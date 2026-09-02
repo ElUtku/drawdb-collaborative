@@ -4,9 +4,11 @@ import logo from "../assets/logo_light_160.png";
 import { SideSheet } from "@douyinfe/semi-ui";
 import { IconMenu } from "@douyinfe/semi-icons";
 import { socials } from "../data/socials";
+import { useAuth } from "../hooks";
 
 export default function Navbar() {
   const [openMenu, setOpenMenu] = useState(false);
+  const { isAuthenticated } = useAuth();
 
   return (
     <>
@@ -44,6 +46,14 @@ export default function Navbar() {
             >
               Docs
             </Link>
+            {!isAuthenticated && (
+              <Link
+                to="/login"
+                className="text-lg font-semibold hover:text-sky-800 transition-colors duration-300"
+              >
+                Sign in
+              </Link>
+            )}
           </div>
           <div className="md:hidden block space-x-3 ms-12">
             <a
@@ -80,8 +90,8 @@ export default function Navbar() {
               target="_blank"
               rel="noreferrer"
             >
-               <i className="fa-solid fa-heart text-rose-300" />
-               <i className="absolute top-1.5 left-1.5 fa-regular fa-heart text-rose-400" />
+              <i className="fa-solid fa-heart text-rose-300" />
+              <i className="absolute top-1.5 left-1.5 fa-regular fa-heart text-rose-400" />
             </a>
           </div>
         </div>
@@ -140,6 +150,17 @@ export default function Navbar() {
         >
           Sponsor
         </Link>
+        {!isAuthenticated && (
+          <>
+            <hr />
+            <Link
+              to="/login"
+              className="hover:bg-zinc-100 block p-3 text-base font-semibold"
+            >
+              Sign in
+            </Link>
+          </>
+        )}
       </SideSheet>
     </>
   );

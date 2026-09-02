@@ -328,6 +328,34 @@ const en = {
     templates: "Templates",
     no_diagrams_match: "No diagrams match your filters.",
     failed_to_load_diagrams: "Failed to load diagrams",
+    sign_in: "Sign in",
+    sign_out: "Sign out",
+    signed_in_as: "Signed in as",
+    username: "Username",
+    password: "Password",
+    confirm_password: "Confirm password",
+    sign_in_subtitle: "Sign in to open and share your diagrams.",
+    create_admin_account: "Create the administrator account",
+    create_admin_subtitle:
+      "This instance has no accounts yet. The first account you create administers it and adds everyone else.",
+    set_up_instance: "Set up this instance",
+    registration_closed:
+      "Accounts are created by the administrator of this instance.",
+    have_account: "Already have an account?",
+    administration: "Administration",
+    add_user: "Add user",
+    users: "Users",
+    admin_users_subtitle:
+      "Only you can create accounts on this instance. New accounts are regular users.",
+    user_created: "Created account {{username}}",
+    admin_label: "Administrator",
+    failed_to_load_users: "Failed to load users",
+    username_rules:
+      "3-32 characters: letters, digits, dot, dash or underscore.",
+    password_rules: "At least 8 characters.",
+    passwords_do_not_match: "Passwords do not match",
+    sign_in_failed: "Sign in failed",
+    sign_up_failed: "Sign up failed",
   },
 };
 

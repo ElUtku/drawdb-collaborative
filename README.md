@@ -39,6 +39,7 @@ by the original drawDB maintainers.
 
 Key additions include:
 
+- Invite-only accounts with server-side sessions, managed by an administrator
 - Centralized diagram storage backed by SQLite
 - Real-time table movement and editing between participants
 - Participant presence and viewport-aware collaborative cursors
@@ -89,9 +90,47 @@ session automatically.
 
 The application exposes:
 
+- `GET /api/auth/status`, `POST /api/auth/register`, `POST /api/auth/login`,
+  `POST /api/auth/logout`, `GET /api/auth/me`
+- `GET|POST /api/admin/users` (administrator only)
 - `GET|POST /api/diagrams`
 - `GET|PUT|DELETE /api/diagrams/:diagramId`
 - `/ws/diagrams/:diagramId` (WebSocket)
+
+### Accounts
+
+Every diagram endpoint and the WebSocket handshake require a signed-in user.
+
+There is no open registration. The first visit to a fresh instance offers
+`/register` once: that first account claims the instance and becomes its
+administrator. From then on `/register` returns `403` and accounts are created
+only by the administrator, through the people icon in the editor toolbar (or
+`POST /api/admin/users`). Accounts created that way are always regular users —
+the administrator role cannot be granted over the API, so an instance has
+exactly one administrator. Upgrading an instance that already had accounts
+promotes its earliest account to administrator.
+
+If the administrator account is lost, the recovery path is direct SQL against
+the database, for example
+`UPDATE users SET is_admin = 1 WHERE username = '<name>';`.
+
+Passwords are hashed with scrypt and sessions are stored in SQLite, referenced
+by an `HttpOnly`, `SameSite=Lax` session cookie that is marked `Secure` when the
+request arrives over HTTPS. Sessions last 30 days and slide forward as they are
+used, so make sure the reverse proxy forwards `X-Forwarded-Proto` (see below)
+for the `Secure` flag to be set correctly.
+
+Access follows an owner-plus-link model:
+
+- The creator owns a diagram, sees it in their diagram list, and is the only
+  one who can delete it.
+- Any signed-in user who has the diagram URL can open, edit, and collaborate on
+  it. Treat diagram URLs as shareable secrets.
+- Diagrams created before authentication was added have no owner. They stay
+  visible and deletable for every signed-in user so no data is stranded.
+
+Collaborator names shown in presence and on cursors come from the signed-in
+account, not from the browser, so clients cannot spoof each other.
 
 Snapshot saves are debounced and guarded by an optimistic version. Stale
 clients receive the current snapshot instead of silently overwriting it.

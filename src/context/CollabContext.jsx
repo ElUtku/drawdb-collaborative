@@ -8,22 +8,27 @@ import {
 } from "react";
 import { nanoid } from "nanoid";
 import { CONNECTION_STATE, MESSAGE_TYPES } from "../collaboration/protocol";
+// Imported directly rather than through ../hooks, which re-exports useCollab
+// and would make this module circular.
+import useAuth from "../hooks/useAuth";
 
 const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c"];
 
-function getIdentity() {
+// The tab keeps a stable client ID and color; the display name always comes
+// from the signed-in account, and the server enforces that on join.
+function getLocalIdentity() {
   const stored = sessionStorage.getItem("drawdb-collaboration-identity");
   if (stored) {
     try {
-      return JSON.parse(stored);
+      const identity = JSON.parse(stored);
+      if (identity?.clientId && identity?.color) return identity;
     } catch {
-      sessionStorage.removeItem("drawdb-collaboration-identity");
+      // Fall through and mint a fresh identity.
     }
+    sessionStorage.removeItem("drawdb-collaboration-identity");
   }
-  const suffix = Math.floor(Math.random() * 900 + 100);
   const identity = {
     clientId: nanoid(),
-    displayName: `Guest ${suffix}`,
     color: COLORS[Math.floor(Math.random() * COLORS.length)],
   };
   sessionStorage.setItem(
@@ -36,7 +41,12 @@ function getIdentity() {
 export const CollabContext = createContext(null);
 
 export default function CollabContextProvider({ children }) {
-  const identityRef = useRef(getIdentity());
+  const { user } = useAuth();
+  const identityRef = useRef({
+    ...getLocalIdentity(),
+    displayName: user?.username ?? "Guest",
+  });
+  const [identity, setIdentity] = useState(identityRef.current);
   const socketRef = useRef(null);
   const reconnectRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
@@ -459,6 +469,13 @@ export default function CollabContextProvider({ children }) {
 
   useEffect(() => disconnect, [disconnect]);
 
+  useEffect(() => {
+    const displayName = user?.username;
+    if (!displayName || identityRef.current.displayName === displayName) return;
+    identityRef.current = { ...identityRef.current, displayName };
+    setIdentity(identityRef.current);
+  }, [user]);
+
   const value = useMemo(
     () => ({
       connect,
@@ -468,7 +485,7 @@ export default function CollabContextProvider({ children }) {
       participants,
       remoteCursors,
       tableLocks,
-      identity: identityRef.current,
+      identity,
       versionRef,
       emitDelta,
       emitAwareness,
@@ -490,6 +507,7 @@ export default function CollabContextProvider({ children }) {
       emitDelta,
       emitAwareness,
       hasTableLock,
+      identity,
       isTableLockedByOther,
       participants,
       remoteCursors,

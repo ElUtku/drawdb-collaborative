@@ -12,7 +12,6 @@ import {
   useTypes,
 } from "../../../hooks";
 import { useTranslation } from "react-i18next";
-import { fromDBML } from "../../../utils/importFrom/dbml";
 
 export default function ImportDiagram({
   setImportData,
@@ -127,11 +126,17 @@ export default function ImportDiagram({
     }
   };
 
-  const loadDBMLData = (e) => {
+  // The DBML parser pulls in several megabytes of generated ANTLR grammars, so
+  // it is only fetched once someone actually drops a .dbml file here.
+  const loadDBMLData = async (e) => {
     try {
+      const { fromDBML } = await import("../../../utils/importFrom/dbml");
       setImportData(fromDBML(e.target.result));
     } catch (error) {
-      const message = `${error.diags[0].name} [Ln ${error.diags[0].location.start.line}, Col ${error.diags[0].location.start.column}]: ${error.diags[0].message}`;
+      const diag = error.diags?.[0];
+      const message = diag
+        ? `${diag.name} [Ln ${diag.location.start.line}, Col ${diag.location.start.column}]: ${diag.message}`
+        : error.message;
 
       setError({ type: STATUS.ERROR, message });
     }
@@ -171,7 +176,7 @@ export default function ImportDiagram({
           const reader = new FileReader();
           reader.onload = async (e) => {
             if (importFrom == IMPORT_FROM.JSON) loadJsonData(f, e);
-            if (importFrom == IMPORT_FROM.DBML) loadDBMLData(e);
+            if (importFrom == IMPORT_FROM.DBML) await loadDBMLData(e);
           };
           reader.readAsText(f);
 

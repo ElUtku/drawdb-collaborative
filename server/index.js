@@ -4,6 +4,16 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import {
+  clearedSessionCookie,
+  createAuthStore,
+  createLoginThrottle,
+  isValidPassword,
+  isValidUsername,
+  parseCookies,
+  sessionCookie,
+  SESSION_COOKIE,
+} from "./auth.js";
 import { createDiagramStore, openDatabase } from "./database.js";
 import { DIAGRAM_ID_PATTERN, isPlainObject } from "./protocol.js";
 import { attachCollaborationServer } from "./websocket.js";
@@ -13,9 +23,85 @@ import { attachCollaborationServer } from "./websocket.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAX_DOCUMENT_BYTES = "2mb";
 
+const ENCODINGS = [
+  ["br", ".br"],
+  ["gzip", ".gz"],
+];
+const CONTENT_TYPES = {
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".ico": "image/x-icon",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain; charset=utf-8",
+  ".xml": "application/xml",
+};
+
+// `npm run build` leaves .br/.gz siblings next to every text asset. Point the
+// request at one of them when the client accepts it; without this the bundle
+// goes over the wire uncompressed.
+function servePrecompressed(assets) {
+  return (req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      next();
+      return;
+    }
+    const [pathname] = req.url.split("?");
+    let decoded;
+    try {
+      decoded = decodeURIComponent(pathname);
+    } catch {
+      next();
+      return;
+    }
+    if (!CONTENT_TYPES[path.extname(decoded).toLowerCase()]) {
+      next();
+      return;
+    }
+    const target = path.join(assets, decoded);
+    if (target !== assets && !target.startsWith(assets + path.sep)) {
+      next();
+      return;
+    }
+    const accepted = String(req.headers["accept-encoding"] || "");
+    for (const [encoding, extension] of ENCODINGS) {
+      if (!accepted.includes(encoding)) continue;
+      if (!fs.existsSync(target + extension)) continue;
+      req.url = pathname + extension;
+      break;
+    }
+    next();
+  };
+}
+
+function setAssetHeaders(res, filePath) {
+  const encoding = ENCODINGS.find(([, extension]) =>
+    filePath.endsWith(extension),
+  );
+  const original = encoding ? filePath.slice(0, -encoding[1].length) : filePath;
+  const contentType = CONTENT_TYPES[path.extname(original).toLowerCase()];
+
+  res.setHeader("Vary", "Accept-Encoding");
+  if (contentType) res.setHeader("Content-Type", contentType);
+  if (encoding) res.setHeader("Content-Encoding", encoding[0]);
+
+  // Vite fingerprints everything under assets/, so those may be cached forever;
+  // index.html must always be revalidated or clients keep the old hashes.
+  if (original.endsWith(".html")) {
+    res.setHeader("Cache-Control", "no-cache");
+  } else if (path.dirname(original).endsWith(`${path.sep}assets`)) {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  }
+}
+
 export function createApplication({ databasePath, staticPath } = {}) {
   const database = openDatabase(databasePath);
   const store = createDiagramStore(database);
+  const auth = createAuthStore(database);
+  const loginThrottle = createLoginThrottle();
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
@@ -35,8 +121,165 @@ export function createApplication({ databasePath, staticPath } = {}) {
     body.name.length <= 200 &&
     isPlainObject(body.document);
 
-  app.get("/api/diagrams", (_req, res) => res.json({ diagrams: store.list() }));
-  app.post("/api/diagrams", (req, res, next) => {
+  const startSession = (req, res, user) => {
+    const { token, expiresAt } = auth.createSession(user.id);
+    res.setHeader(
+      "Set-Cookie",
+      sessionCookie(token, { secure: req.secure, expiresAt }),
+    );
+  };
+
+  const requireAuth = (req, res, next) => {
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+    const session = auth.resolveSession(token);
+    if (!session) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    if (session.renewedUntil) {
+      res.setHeader(
+        "Set-Cookie",
+        sessionCookie(token, {
+          secure: req.secure,
+          expiresAt: session.renewedUntil,
+        }),
+      );
+    }
+    req.user = session.user;
+    next();
+  };
+
+  const requireAdmin = (req, res, next) => {
+    if (!req.user.isAdmin) {
+      res.status(403).json({ error: "Administrator access is required" });
+      return;
+    }
+    next();
+  };
+
+  const credentials = (body) =>
+    isPlainObject(body) &&
+    isValidUsername(body.username) &&
+    isValidPassword(body.password);
+
+  const CREDENTIALS_ERROR =
+    "A username of 3-32 letters, digits, dot, dash or underscore and a password of at least 8 characters are required";
+
+  // Self-service registration exists only to claim the empty instance. The
+  // first account becomes the administrator; everyone else is created by them.
+  app.get("/api/auth/status", (_req, res) =>
+    res.json({ setupRequired: auth.countUsers() === 0 }),
+  );
+
+  app.post("/api/auth/register", async (req, res, next) => {
+    try {
+      if (auth.countUsers() > 0) {
+        res.status(403).json({
+          error: "Registration is closed. Ask an administrator for an account.",
+        });
+        return;
+      }
+      if (!credentials(req.body)) {
+        res.status(400).json({ error: CREDENTIALS_ERROR });
+        return;
+      }
+      const result = await auth.createUser({
+        username: req.body.username,
+        password: req.body.password,
+        isAdmin: true,
+        requireEmpty: true,
+      });
+      if (result.status === "already_initialized") {
+        res.status(403).json({
+          error: "Registration is closed. Ask an administrator for an account.",
+        });
+        return;
+      }
+      if (result.status === "taken") {
+        res.status(409).json({ error: "Username is already taken" });
+        return;
+      }
+      startSession(req, res, result.user);
+      res.status(201).json({ user: result.user });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/users", requireAuth, requireAdmin, (_req, res) =>
+    res.json({ users: auth.listUsers() }),
+  );
+
+  app.post(
+    "/api/admin/users",
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+      try {
+        if (!credentials(req.body)) {
+          res.status(400).json({ error: CREDENTIALS_ERROR });
+          return;
+        }
+        // Administrator status is not transferable: accounts made here are plain
+        // users regardless of what the request body asks for.
+        const result = await auth.createUser({
+          username: req.body.username,
+          password: req.body.password,
+        });
+        if (result.status === "taken") {
+          res.status(409).json({ error: "Username is already taken" });
+          return;
+        }
+        res.status(201).json({ user: result.user });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.post("/api/auth/login", async (req, res, next) => {
+    try {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({ error: "A username and password are required" });
+        return;
+      }
+      const throttleKey = `${req.ip}:${String(req.body.username).toLowerCase()}`;
+      const throttle = loginThrottle.check(throttleKey);
+      if (!throttle.allowed) {
+        res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
+        res.status(429).json({ error: "Too many attempts. Try again later." });
+        return;
+      }
+      const user = credentials(req.body)
+        ? await auth.verifyCredentials(req.body)
+        : null;
+      if (!user) {
+        loginThrottle.fail(throttleKey);
+        res.status(401).json({ error: "Invalid username or password" });
+        return;
+      }
+      loginThrottle.succeed(throttleKey);
+      startSession(req, res, user);
+      res.json({ user });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    auth.deleteSession(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+    res.setHeader("Set-Cookie", clearedSessionCookie({ secure: req.secure }));
+    res.status(204).end();
+  });
+
+  app.get("/api/auth/me", requireAuth, (req, res) =>
+    res.json({ user: req.user }),
+  );
+
+  app.get("/api/diagrams", requireAuth, (req, res) =>
+    res.json({ diagrams: store.list(req.user.id) }),
+  );
+  app.post("/api/diagrams", requireAuth, (req, res, next) => {
     try {
       if (!validPayload(req.body)) {
         res
@@ -54,23 +297,23 @@ export function createApplication({ databasePath, staticPath } = {}) {
         res.status(409).json({ error: "Diagram already exists" });
         return;
       }
-      res.status(201).json(store.create({ id, ...req.body }));
+      res
+        .status(201)
+        .json(store.create({ ...req.body, id, ownerId: req.user.id }));
     } catch (error) {
       next(error);
     }
   });
-  app.get("/api/diagrams/:id", validId, (req, res) => {
+  app.get("/api/diagrams/:id", requireAuth, validId, (req, res) => {
     const diagram = store.get(req.params.id);
     if (!diagram) res.status(404).json({ error: "Diagram not found" });
     else res.json(diagram);
   });
-  app.put("/api/diagrams/:id", validId, (req, res) => {
+  app.put("/api/diagrams/:id", requireAuth, validId, (req, res) => {
     if (!validPayload(req.body) || !Number.isInteger(req.body.baseVersion)) {
-      res
-        .status(400)
-        .json({
-          error: "A valid name, document, and baseVersion are required",
-        });
+      res.status(400).json({
+        error: "A valid name, document, and baseVersion are required",
+      });
       return;
     }
     const result = store.updateSnapshot({ id: req.params.id, ...req.body });
@@ -82,18 +325,29 @@ export function createApplication({ databasePath, staticPath } = {}) {
         .json({ error: "Version conflict", diagram: result.diagram });
     } else res.json(result.diagram);
   });
-  app.delete("/api/diagrams/:id", validId, (req, res) => {
-    if (!store.delete(req.params.id))
+  app.delete("/api/diagrams/:id", requireAuth, validId, (req, res) => {
+    const diagram = store.get(req.params.id);
+    if (!diagram) {
       res.status(404).json({ error: "Diagram not found" });
-    else res.status(204).end();
+      return;
+    }
+    // Anyone with the link may edit, but only the owner may delete.
+    if (diagram.owner_id && diagram.owner_id !== req.user.id) {
+      res.status(403).json({ error: "Only the owner can delete this diagram" });
+      return;
+    }
+    store.delete(req.params.id);
+    res.status(204).end();
   });
 
   const assets = staticPath || path.resolve(__dirname, "../dist");
   if (fs.existsSync(assets)) {
-    app.use(express.static(assets));
-    app.get("*splat", (_req, res) =>
-      res.sendFile(path.join(assets, "index.html")),
-    );
+    app.use(servePrecompressed(assets));
+    app.use(express.static(assets, { setHeaders: setAssetHeaders }));
+    app.get("*splat", (_req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
+      res.sendFile(path.join(assets, "index.html"));
+    });
   }
   app.use((error, _req, res, next) => {
     void next;
@@ -106,8 +360,17 @@ export function createApplication({ databasePath, staticPath } = {}) {
   });
 
   const server = http.createServer(app);
-  const websocket = attachCollaborationServer(server, store);
-  return { app, server, websocket, database, store };
+  const websocket = attachCollaborationServer(server, store, auth);
+
+  auth.pruneExpiredSessions();
+  const sessionSweep = setInterval(
+    () => auth.pruneExpiredSessions(),
+    60 * 60 * 1000,
+  );
+  sessionSweep.unref();
+  server.on("close", () => clearInterval(sessionSweep));
+
+  return { app, server, websocket, database, store, auth };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

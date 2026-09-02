@@ -1,19 +1,6 @@
-const JSON_HEADERS = { "Content-Type": "application/json" };
+import { request } from "./request";
 
-async function request(url, options) {
-  const response = await fetch(url, options);
-  if (response.status === 204) return null;
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(
-      body.error || `Request failed (${response.status})`,
-    );
-    error.status = response.status;
-    error.diagram = body.diagram;
-    throw error;
-  }
-  return body;
-}
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
 export const diagramApi = {
   async list() {

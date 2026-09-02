@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { parseCookies, SESSION_COOKIE } from "./auth.js";
 import {
   CLIENT_ID_PATTERN,
   DIAGRAM_ID_PATTERN,
@@ -18,7 +19,7 @@ function send(socket, message) {
   }
 }
 
-export function attachCollaborationServer(server, store) {
+export function attachCollaborationServer(server, store, auth) {
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_MESSAGE_BYTES,
@@ -55,17 +56,27 @@ export function attachCollaborationServer(server, store) {
     const url = new URL(request.url, "http://localhost");
     const match = url.pathname.match(/^\/ws\/diagrams\/([^/]+)$/);
     const diagramId = match?.[1];
-    if (
-      !diagramId ||
-      !DIAGRAM_ID_PATTERN.test(diagramId) ||
-      !store.get(diagramId)
-    ) {
+    if (!diagramId || !DIAGRAM_ID_PATTERN.test(diagramId)) {
+      socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    const session = auth.resolveSession(
+      parseCookies(request.headers.cookie)[SESSION_COOKIE],
+    );
+    if (!session) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    if (!store.get(diagramId)) {
       socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
       socket.destroy();
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
       ws.diagramId = diagramId;
+      ws.user = session.user;
       wss.emit("connection", ws, request);
     });
   });
@@ -106,7 +117,12 @@ export function attachCollaborationServer(server, store) {
           });
           return;
         }
-        socket.participant = message.participant;
+        // The signed-in account, not the client, decides the shown identity.
+        socket.participant = {
+          ...message.participant,
+          userId: socket.user.id,
+          displayName: socket.user.username,
+        };
         const diagram = store.get(diagramId);
         send(socket, {
           type: MESSAGE_TYPES.JOINED,

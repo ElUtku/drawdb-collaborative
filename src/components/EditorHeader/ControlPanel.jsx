@@ -13,6 +13,8 @@ import {
 } from "@douyinfe/semi-icons";
 import { Link, useMatch, useParams } from "react-router-dom";
 import icon from "../../assets/icon_dark_64.png";
+import UserMenu from "./UserMenu";
+import AdminButton from "./AdminButton";
 import {
   Divider,
   Dropdown,
@@ -45,7 +47,6 @@ import {
   noteWidth,
   pngExportPixelRatio,
 } from "../../data/constants";
-import jsPDF from "jspdf";
 import { useHotkeys } from "react-hotkeys-hook";
 import { Validator } from "jsonschema";
 import { areaSchema, noteSchema, tableSchema } from "../../data/schemas";
@@ -1304,9 +1305,11 @@ export default function ControlPanel({
           },
           {
             name: "PDF",
-            function: () => {
+            function: async () => {
               const canvas = document.getElementById("canvas");
               const filename = `${title}_${new Date().toISOString()}`;
+              // jsPDF and its html2canvas/dompurify chain only matter here.
+              const { default: jsPDF } = await import("jspdf");
               toJpeg(canvas).then(function (dataUrl) {
                 const doc = new jsPDF("l", "px", [
                   canvas.offsetWidth,
@@ -1725,6 +1728,8 @@ export default function ControlPanel({
             <div className="flex items-center gap-2 me-7">
               <Slot name="header-actions-start" />
               <Slot name="header-actions-end" />
+              <AdminButton />
+              <UserMenu />
             </div>
           </div>
         )}

@@ -1,7 +1,5 @@
 import { Image, Input, Modal as SemiUIModal, Spin } from "@douyinfe/semi-ui";
 import { saveAs } from "file-saver";
-import { Parser } from "node-sql-parser";
-import { Parser as OracleParser } from "oracle-sql-parser";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DB, MODAL, STATUS } from "../../../data/constants";
@@ -104,16 +102,20 @@ export default function Modal({
     }
   };
 
-  const parseSQLAndLoadDiagram = () => {
+  // The SQL grammars are large enough to dominate the main bundle, so they are
+  // loaded on demand when an import is actually run.
+  const parseSQLAndLoadDiagram = async () => {
     const targetDatabase = database === DB.GENERIC ? importDb : database;
 
     let ast = null;
     try {
       if (targetDatabase === DB.ORACLESQL) {
+        const { Parser: OracleParser } = await import("oracle-sql-parser");
         const oracleParser = new OracleParser();
 
         ast = oracleParser.parse(importSource.src);
       } else {
+        const { Parser } = await import("node-sql-parser");
         const parser = new Parser();
         const normalizedSource = normalizeSQLForParser(
           importSource.src,
