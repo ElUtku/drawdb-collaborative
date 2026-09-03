@@ -15,6 +15,8 @@ import {
   SESSION_COOKIE,
 } from "./auth.js";
 import { createDiagramStore, openDatabase } from "./database.js";
+import { isGitAvailable, isGitError } from "./git.js";
+import { createGitSyncService, defaultGitRoot } from "./gitSync.js";
 import { DIAGRAM_ID_PATTERN, isPlainObject } from "./protocol.js";
 import { attachCollaborationServer } from "./websocket.js";
 
@@ -101,6 +103,11 @@ export function createApplication({ databasePath, staticPath } = {}) {
   const database = openDatabase(databasePath);
   const store = createDiagramStore(database);
   const auth = createAuthStore(database);
+  const gitSync = createGitSyncService({
+    db: database,
+    store,
+    rootDir: defaultGitRoot(databasePath),
+  });
   const loginThrottle = createLoginThrottle();
   const app = express();
   app.disable("x-powered-by");
@@ -339,6 +346,134 @@ export function createApplication({ databasePath, staticPath } = {}) {
     store.delete(req.params.id);
     res.status(204).end();
   });
+
+  // Repository sync. Anyone who can edit a diagram may push it or pull it back,
+  // but only the owner may point it at a repository, because the settings carry
+  // a credential.
+  const withDiagram = (req, res, next) => {
+    const diagram = store.get(req.params.id);
+    if (!diagram) {
+      res.status(404).json({ error: "Diagram not found" });
+      return;
+    }
+    req.diagram = diagram;
+    next();
+  };
+  const requireDiagramOwner = (req, res, next) => {
+    if (req.diagram.owner_id && req.diagram.owner_id !== req.user.id) {
+      res
+        .status(403)
+        .json({ error: "Only the owner can configure repository sync" });
+      return;
+    }
+    next();
+  };
+  const gitRoute = (handler) => async (req, res, next) => {
+    try {
+      await handler(req, res);
+    } catch (error) {
+      if (isGitError(error)) {
+        res.status(error.status).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  };
+  const gitGuards = [requireAuth, validId, withDiagram];
+
+  app.get(
+    "/api/diagrams/:id/git",
+    ...gitGuards,
+    gitRoute(async (req, res) => {
+      res.json({
+        available: await isGitAvailable(),
+        canConfigure:
+          !req.diagram.owner_id || req.diagram.owner_id === req.user.id,
+        settings: gitSync.settings(req.params.id),
+      });
+    }),
+  );
+
+  app.put(
+    "/api/diagrams/:id/git",
+    ...gitGuards,
+    requireDiagramOwner,
+    gitRoute(async (req, res) => {
+      const settings = await gitSync.save(req.params.id, req.body ?? {}, {
+        diagramName: req.diagram.name,
+      });
+      res.json({ settings });
+    }),
+  );
+
+  app.delete(
+    "/api/diagrams/:id/git",
+    ...gitGuards,
+    requireDiagramOwner,
+    gitRoute(async (req, res) => {
+      gitSync.delete(req.params.id);
+      res.status(204).end();
+    }),
+  );
+
+  app.post(
+    "/api/diagrams/:id/git/test",
+    ...gitGuards,
+    gitRoute(async (req, res) => {
+      res.json(await gitSync.test(req.params.id));
+    }),
+  );
+
+  app.get(
+    "/api/diagrams/:id/git/history",
+    ...gitGuards,
+    gitRoute(async (req, res) => {
+      res.json(await gitSync.history(req.params.id));
+    }),
+  );
+
+  app.post(
+    "/api/diagrams/:id/git/push",
+    ...gitGuards,
+    gitRoute(async (req, res) => {
+      const body = isPlainObject(req.body) ? req.body : {};
+      res.json(
+        await gitSync.push(req.params.id, {
+          sql: typeof body.sql === "string" ? body.sql : undefined,
+          message: body.message,
+          user: req.user,
+        }),
+      );
+    }),
+  );
+
+  app.post(
+    "/api/diagrams/:id/git/pull",
+    ...gitGuards,
+    gitRoute(async (req, res) => {
+      const pulled = await gitSync.pull(req.params.id);
+      const result = store.updateSnapshot({
+        id: req.params.id,
+        name: pulled.name ?? req.diagram.name,
+        document: pulled.document,
+        baseVersion: req.diagram.version,
+      });
+      if (result.status !== "updated") {
+        res.status(409).json({
+          error: "The diagram changed while it was being pulled. Try again.",
+          diagram: result.diagram,
+        });
+        return;
+      }
+      // Everyone with the diagram open is holding the pre-pull snapshot.
+      websocket.broadcastSnapshot(req.params.id, result.diagram);
+      res.json({
+        diagram: result.diagram,
+        commit: pulled.commit,
+        file: pulled.file,
+      });
+    }),
+  );
 
   const assets = staticPath || path.resolve(__dirname, "../dist");
   if (fs.existsSync(assets)) {

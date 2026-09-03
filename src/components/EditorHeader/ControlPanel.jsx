@@ -15,6 +15,7 @@ import { Link, useMatch, useParams } from "react-router-dom";
 import icon from "../../assets/icon_dark_64.png";
 import UserMenu from "./UserMenu";
 import AdminButton from "./AdminButton";
+import GitPanel from "./GitPanel";
 import {
   Divider,
   Dropdown,
@@ -96,6 +97,7 @@ export default function ControlPanel({
   setTitle,
   lastSaved,
   toolbarContainer,
+  applyDiagram,
 }) {
   const { id: diagramId } = useParams();
 
@@ -1007,6 +1009,11 @@ export default function ControlPanel({
           }
         },
       },
+      git_sync: {
+        function: () => setModal(MODAL.GIT),
+        // A template has not been stored yet, so it has nothing to sync.
+        disabled: !diagramId || Boolean(isTemplate),
+      },
       import_from: {
         children: [
           {
@@ -1757,6 +1764,13 @@ export default function ControlPanel({
       <ConfigureCustomTypes
         open={modal === MODAL.CONFIG_CUSTOM_TYPES}
         onClose={() => setModal(MODAL.NONE)}
+      />
+      <GitPanel
+        open={modal === MODAL.GIT}
+        onClose={() => setModal(MODAL.NONE)}
+        diagramId={diagramId}
+        title={title}
+        applyDiagram={applyDiagram}
       />
     </>
   );

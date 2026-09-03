@@ -58,6 +58,30 @@ export function openDatabase(databasePath = process.env.DATABASE_PATH) {
     );
 
     CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions (user_id);
+
+    CREATE TABLE IF NOT EXISTS app_secrets (
+      name TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS diagram_git_settings (
+      diagram_id TEXT PRIMARY KEY,
+      remote_url TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      directory TEXT NOT NULL DEFAULT '',
+      file_name TEXT NOT NULL,
+      auth_username TEXT,
+      token_cipher TEXT,
+      author_name TEXT,
+      author_email TEXT,
+      last_commit TEXT,
+      last_commit_message TEXT,
+      last_synced_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (diagram_id) REFERENCES diagrams(id) ON DELETE CASCADE
+    );
   `);
 
   const hasColumn = (table, column) =>

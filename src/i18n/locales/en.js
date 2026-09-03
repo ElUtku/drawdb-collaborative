@@ -356,6 +356,50 @@ const en = {
     passwords_do_not_match: "Passwords do not match",
     sign_in_failed: "Sign in failed",
     sign_up_failed: "Sign up failed",
+    git_sync: "Sync with git",
+    git_repository: "Repository",
+    git_remote_url: "Repository URL",
+    git_remote_url_hint:
+      "An https:// or git@host:path URL. The server pushes and pulls with it.",
+    git_branch: "Branch",
+    git_directory: "Path in the repository",
+    git_directory_hint: "Leave empty to commit to the repository root.",
+    git_file_name: "File name",
+    git_file_name_hint: "Committed as <name>.json and <name>.sql.",
+    git_auth_username: "User name",
+    git_auth_username_hint: "For https remotes. Defaults to x-access-token.",
+    git_token: "Access token",
+    git_token_hint:
+      "A personal access token with write access. Stored encrypted and never sent back.",
+    git_token_stored: "Stored token kept unless replaced",
+    git_author_name: "Commit author",
+    git_author_email: "Author email",
+    git_save_settings: "Save settings",
+    git_test_connection: "Test connection",
+    git_disconnect: "Disconnect",
+    git_disconnect_confirm:
+      "The diagram stops syncing. Nothing already committed is removed.",
+    git_not_connected_hint:
+      "This diagram is not connected to a repository yet. Fill in the repository below to start syncing.",
+    git_files: "Commits {{json}} and {{sql}}",
+    git_last_sync: "Last synced {{when}} ({{commit}})",
+    git_commit_message: "Commit message",
+    git_commit_message_placeholder: "Commit message (optional)",
+    git_push: "Commit and push",
+    git_pull: "Pull from repository",
+    git_pull_confirm:
+      "The diagram is replaced by the version in the repository for everyone editing it. Unsaved local changes are lost.",
+    git_history: "History",
+    git_pushed: "Pushed as {{commit}}",
+    git_unchanged: "The repository is already up to date",
+    git_pulled: "Pulled {{commit}} from the repository",
+    git_connection_ok: "The repository and branch are reachable",
+    git_branch_missing:
+      "The repository is reachable. Branch {{branch}} is created by the first push.",
+    git_unavailable:
+      "git is not installed on the server, so repository sync is unavailable.",
+    git_owner_only:
+      "Only the diagram owner can change these settings. You can still push and pull.",
   },
 };
 

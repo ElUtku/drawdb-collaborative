@@ -87,6 +87,7 @@ export const MODAL = {
   TABLE_WIDTH: 9,
   LANGUAGE: 10,
   CONFIG_CUSTOM_TYPES: 11,
+  GIT: 12,
 };
 
 export const STATUS = {

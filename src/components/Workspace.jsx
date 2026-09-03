@@ -374,6 +374,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
           setTitle={setTitle}
           lastSaved={lastSaved}
           toolbarContainer={toolbarContainer}
+          applyDiagram={applyDiagramState}
         />
       </IdContext.Provider>
       <div

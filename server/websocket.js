@@ -353,5 +353,15 @@ export function attachCollaborationServer(server, store, auth) {
   lockSweep.unref();
   wss.on("close", () => clearInterval(heartbeat));
   wss.on("close", () => clearInterval(lockSweep));
+
+  // A snapshot written outside the socket layer — a git pull, for instance —
+  // still has to reach everyone who has the diagram open.
+  wss.broadcastSnapshot = (diagramId, diagram) => {
+    broadcast(diagramId, {
+      type: MESSAGE_TYPES.SNAPSHOT,
+      diagramId,
+      ...diagram,
+    });
+  };
   return wss;
 }
