@@ -372,6 +372,24 @@ const en = {
     git_token_hint:
       "A personal access token with write access. Stored encrypted and never sent back.",
     git_token_stored: "Stored token kept unless replaced",
+    git_token_help: "How to create an access token",
+    git_token_help_github: "GitHub — fine-grained personal access token",
+    git_token_help_github_owner:
+      "Resource owner: the account or organisation that owns the repository. An organisation has to allow fine-grained tokens for them to see it at all.",
+    git_token_help_github_repository:
+      "Repository access: Only select repositories, and pick the schema repository.",
+    git_token_help_github_contents:
+      "Repository permissions → Contents: Read and write. That is the only permission needed; it covers fetch, push and creating the branch on the first push.",
+    git_token_help_github_metadata:
+      "Metadata: Read-only is added by GitHub and cannot be turned off. Nothing else is needed — Workflows only matters for commits that touch .github/workflows.",
+    git_token_help_github_expiry:
+      "When the token expires, pushing fails with an authentication error. Paste a new token here to replace it.",
+    git_token_help_gitlab:
+      "GitLab: a project access token with the Developer role and the write_repository scope.",
+    git_token_help_sso:
+      "An organisation that uses SAML SSO also needs the token authorised for it.",
+    git_token_help_protected:
+      "A branch that only accepts pull requests rejects the push. Sync to a branch that is not protected.",
     git_author_name: "Commit author",
     git_author_email: "Author email",
     git_save_settings: "Save settings",

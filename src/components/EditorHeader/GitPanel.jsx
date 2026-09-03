@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Banner,
   Button,
+  Collapse,
   Input,
   Modal,
   Popconfirm,
@@ -232,7 +233,7 @@ export default function GitPanel({
       footer={null}
       centered
       width={620}
-      bodyStyle={{ maxHeight: "70vh", overflow: "auto" }}
+      bodyStyle={{ maxHeight: "70vh", overflow: "auto", paddingBottom: 24 }}
     >
       {loading ? (
         <div className="flex justify-center py-8">
@@ -391,6 +392,30 @@ export default function GitPanel({
               placeholder: settings?.hasToken ? t("git_token_stored") : "",
               hint: t("git_token_hint"),
             })}
+            <Collapse keepDOM={false}>
+              <Collapse.Panel
+                header={<span className="text-sm">{t("git_token_help")}</span>}
+                itemKey="token-help"
+              >
+                <div className="text-xs text-zinc-500 flex flex-col gap-2">
+                  <div>
+                    <div className="font-medium">
+                      {t("git_token_help_github")}
+                    </div>
+                    <ul className="list-disc ps-4 mt-1 flex flex-col gap-1">
+                      <li>{t("git_token_help_github_owner")}</li>
+                      <li>{t("git_token_help_github_repository")}</li>
+                      <li>{t("git_token_help_github_contents")}</li>
+                      <li>{t("git_token_help_github_metadata")}</li>
+                      <li>{t("git_token_help_github_expiry")}</li>
+                    </ul>
+                  </div>
+                  <div>{t("git_token_help_gitlab")}</div>
+                  <div>{t("git_token_help_sso")}</div>
+                  <div>{t("git_token_help_protected")}</div>
+                </div>
+              </Collapse.Panel>
+            </Collapse>
             <div className="grid grid-cols-2 gap-3">
               {field(t("git_author_name"), "authorName", {
                 placeholder: user?.username ?? "drawDB",

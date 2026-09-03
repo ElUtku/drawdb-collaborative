@@ -260,6 +260,24 @@ const ru = {
     git_token_hint:
       "Токен с правом записи. Хранится в зашифрованном виде и никогда не возвращается обратно.",
     git_token_stored: "Сохранённый токен останется, если не заменить",
+    git_token_help: "Как создать токен доступа",
+    git_token_help_github: "GitHub — fine-grained personal access token",
+    git_token_help_github_owner:
+      "Resource owner: аккаунт или организация, которой принадлежит репозиторий. Организация должна разрешать fine-grained токены, иначе репозиторий не будет виден.",
+    git_token_help_github_repository:
+      "Repository access: Only select repositories, выберите репозиторий со схемой.",
+    git_token_help_github_contents:
+      "Repository permissions → Contents: Read and write. Это единственное нужное право: оно покрывает fetch, push и создание ветки первым коммитом.",
+    git_token_help_github_metadata:
+      "Metadata: Read-only GitHub добавит сам, отключить нельзя. Больше ничего не нужно — Workflows требуется только для коммитов, меняющих .github/workflows.",
+    git_token_help_github_expiry:
+      "Когда срок токена истечёт, отправка начнёт падать с ошибкой аутентификации. Вставьте сюда новый токен, он заменит старый.",
+    git_token_help_gitlab:
+      "GitLab: project access token с ролью Developer и скоупом write_repository.",
+    git_token_help_sso:
+      "Если в организации включён SAML SSO, токен нужно дополнительно авторизовать для неё.",
+    git_token_help_protected:
+      "Ветка, в которую можно писать только через pull request, отклонит push. Синхронизируйтесь с незащищённой веткой.",
     git_author_name: "Автор коммитов",
     git_author_email: "Email автора",
     git_save_settings: "Сохранить настройки",

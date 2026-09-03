@@ -55,6 +55,7 @@ export default function AdminPanel({ visible, onClose }) {
       footer={null}
       centered
       width={480}
+      bodyStyle={{ paddingBottom: 24 }}
     >
       <p className="text-sm text-zinc-500 mb-4">{t("admin_users_subtitle")}</p>
 
