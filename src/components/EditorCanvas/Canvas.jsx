@@ -764,7 +764,7 @@ export default function Canvas() {
         setTransform((prev) => ({
           ...prev,
           pan: {
-            ...prev.pan,
+            x: prev.pan.x + e.deltaX / prev.zoom,
             y: prev.pan.y + e.deltaY / prev.zoom,
           },
         }));
