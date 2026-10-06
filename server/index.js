@@ -1,24 +1,19 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import {
-  clearedSessionCookie,
-  createAuthStore,
-  createSetupCode,
-  createLoginThrottle,
-  isValidPassword,
-  isValidUsername,
-  parseCookies,
-  sessionCookie,
-  SESSION_COOKIE,
-} from "./auth.js";
-import { createDiagramStore, openDatabase } from "./database.js";
-import { isGitAvailable, isGitError } from "./git.js";
+import { createAuditLog } from "./audit.js";
+import { createAuthStore, createSetupCode } from "./auth.js";
+import { createBackupService } from "./backup.js";
+import { createCustomTypeStore } from "./customTypes.js";
+import { createDiagramStore, LINK_ACCESS, openDatabase } from "./database.js";
+import { createDiagramService } from "./diagramService.js";
 import { createGitSyncService, defaultGitRoot } from "./gitSync.js";
-import { DIAGRAM_ID_PATTERN, isPlainObject } from "./protocol.js";
+import { registerAdminRoutes } from "./routes/admin.js";
+import { registerAuthRoutes } from "./routes/auth.js";
+import { registerDiagramRoutes } from "./routes/diagrams.js";
+import { createGuards } from "./routes/guards.js";
 import { attachCollaborationServer } from "./websocket.js";
 
 /* global process */
@@ -156,15 +151,41 @@ function parseTrustProxy(value) {
   return Number.isInteger(hops) && hops >= 0 ? hops : value;
 }
 
+const numberEnv = (name, fallback) => {
+  const value = Number(process.env[name]);
+  return process.env[name] !== undefined &&
+    process.env[name] !== "" &&
+    Number.isFinite(value) &&
+    value >= 0
+    ? value
+    : fallback;
+};
+
 export function createApplication({
   databasePath,
   staticPath,
   setupCode,
   log = console.log,
+  backupDirectory,
 } = {}) {
-  const database = openDatabase(databasePath);
-  const store = createDiagramStore(database);
+  const resolvedDatabasePath = databasePath ?? process.env.DATABASE_PATH;
+  const database = openDatabase(resolvedDatabasePath);
+  const defaultLinkAccess = LINK_ACCESS.includes(
+    process.env.DEFAULT_LINK_ACCESS,
+  )
+    ? process.env.DEFAULT_LINK_ACCESS
+    : "none";
+  const store = createDiagramStore(database, {
+    historyIntervalMs: numberEnv("HISTORY_INTERVAL_MINUTES", 10) * 60_000,
+    historyLimit: Math.max(1, numberEnv("HISTORY_LIMIT", 200)),
+    defaultLinkAccess,
+  });
   const auth = createAuthStore(database);
+  const audit = createAuditLog(database, {
+    retentionDays: Math.max(1, numberEnv("AUDIT_RETENTION_DAYS", 365)),
+  });
+  const customTypes = createCustomTypeStore(database);
+  const diagrams = createDiagramService({ store, audit });
   // Until the administrator exists, creating it takes a code that only someone
   // with access to the server (its log or its configuration) can know.
   const setup = createSetupCode(setupCode);
@@ -178,19 +199,24 @@ export function createApplication({
     store,
     rootDir: defaultGitRoot(databasePath),
   });
-  const loginThrottle = createLoginThrottle();
-  // Also caps failed sign-ins per address across all usernames, so one source
-  // cannot try a few passwords on every account.
-  const loginIpThrottle = createLoginThrottle({ maxAttempts: 50 });
-  // Caps self-service sign-ups per client IP (5 per hour) when registration is open.
-  const registerThrottle = createLoginThrottle({
-    maxAttempts: 5,
-    windowMs: 60 * 60 * 1000,
+  const inMemory = !resolvedDatabasePath || resolvedDatabasePath === ":memory:";
+  const backups = createBackupService({
+    db: database,
+    directory:
+      backupDirectory ??
+      (process.env.BACKUP_DIR
+        ? path.resolve(process.env.BACKUP_DIR)
+        : inMemory
+          ? null
+          : path.join(
+              path.dirname(path.resolve(resolvedDatabasePath)),
+              "backups",
+            )),
+    intervalHours: numberEnv("BACKUP_INTERVAL_HOURS", 24),
+    keep: Math.max(1, numberEnv("BACKUP_KEEP", 14)),
+    log,
   });
-  const passwordThrottle = createLoginThrottle();
-  const openRegistration = /^(1|true|yes)$/i.test(
-    process.env.OPEN_REGISTRATION || "",
-  );
+
   const app = express();
   app.disable("x-powered-by");
   // Only trust X-Forwarded-* when a reverse proxy really sits in front.
@@ -210,464 +236,28 @@ export function createApplication({
   });
   app.use(express.json({ limit: MAX_DOCUMENT_BYTES }));
 
-  const validId = (req, res, next) => {
-    if (!DIAGRAM_ID_PATTERN.test(req.params.id || "")) {
-      res.status(400).json({ error: "Invalid diagram ID" });
-      return;
-    }
-    next();
+  // The collaboration server is created with the HTTP server below; routes
+  // reach it through this getter.
+  let websocket = null;
+  const context = {
+    auth,
+    audit,
+    backups,
+    customTypes,
+    diagrams,
+    gitSync,
+    setup,
+    store,
+    guards: createGuards({ auth, store }),
+    websocket: () => websocket,
   };
-  const validPayload = (body) =>
-    isPlainObject(body) &&
-    typeof body.name === "string" &&
-    body.name.trim().length > 0 &&
-    body.name.length <= 200 &&
-    isPlainObject(body.document);
+  registerAuthRoutes(app, context);
+  registerAdminRoutes(app, context);
+  registerDiagramRoutes(app, context);
 
-  const startSession = (req, res, user) => {
-    const { token, expiresAt } = auth.createSession(user.id);
-    res.setHeader(
-      "Set-Cookie",
-      sessionCookie(token, { secure: req.secure, expiresAt }),
-    );
-  };
-
-  const requireAuth = (req, res, next) => {
-    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-    const session = auth.resolveSession(token);
-    if (!session) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-    if (session.renewedUntil) {
-      res.setHeader(
-        "Set-Cookie",
-        sessionCookie(token, {
-          secure: req.secure,
-          expiresAt: session.renewedUntil,
-        }),
-      );
-    }
-    req.user = session.user;
-    next();
-  };
-
-  const requireAdmin = (req, res, next) => {
-    if (!req.user.isAdmin) {
-      res.status(403).json({ error: "Administrator access is required" });
-      return;
-    }
-    next();
-  };
-
-  const credentials = (body) =>
-    isPlainObject(body) &&
-    isValidUsername(body.username) &&
-    isValidPassword(body.password);
-
-  const CREDENTIALS_ERROR =
-    "A username of 3-32 letters, digits, dot, dash or underscore and a password of at least 8 characters are required";
-
-  // The first account always claims the empty instance and becomes the
-  // administrator. After that, sign-up stays closed unless OPEN_REGISTRATION
-  // is enabled, in which case anyone can create a regular (non-admin) account.
-  app.get("/api/auth/status", (_req, res) =>
-    res.json({
-      setupRequired: auth.countUsers() === 0,
-      registrationOpen: openRegistration,
-    }),
-  );
-
-  app.post("/api/auth/register", async (req, res, next) => {
-    try {
-      const bootstrap = auth.countUsers() === 0;
-      if (!bootstrap && !openRegistration) {
-        res.status(403).json({
-          error: "Registration is closed. Ask an administrator for an account.",
-        });
-        return;
-      }
-      if (!credentials(req.body)) {
-        res.status(400).json({ error: CREDENTIALS_ERROR });
-        return;
-      }
-      const throttleKey = `register:${req.ip}`;
-      const throttle = registerThrottle.check(throttleKey);
-      if (!throttle.allowed) {
-        res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
-        res.status(429).json({ error: "Too many attempts. Try again later." });
-        return;
-      }
-      registerThrottle.fail(throttleKey);
-      if (bootstrap && !setup.matches(req.body.setupCode)) {
-        res.status(403).json({
-          error:
-            "The setup code is not correct. It is printed in the server log when the server starts without accounts.",
-        });
-        return;
-      }
-      const result = await auth.createUser({
-        username: req.body.username,
-        password: req.body.password,
-        isAdmin: bootstrap,
-        requireEmpty: bootstrap,
-      });
-      if (result.status === "already_initialized") {
-        res.status(409).json({
-          error:
-            "The administrator account was just created. Sign in or try again.",
-        });
-        return;
-      }
-      if (result.status === "taken") {
-        res.status(409).json({ error: "Username is already taken" });
-        return;
-      }
-      startSession(req, res, result.user);
-      res.status(201).json({ user: result.user });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.get("/api/admin/users", requireAuth, requireAdmin, (_req, res) =>
-    res.json({ users: auth.listUsers() }),
-  );
-
-  app.post(
-    "/api/admin/users",
-    requireAuth,
-    requireAdmin,
-    async (req, res, next) => {
-      try {
-        if (!credentials(req.body)) {
-          res.status(400).json({ error: CREDENTIALS_ERROR });
-          return;
-        }
-        // Administrator status is not transferable: accounts made here are plain
-        // users regardless of what the request body asks for.
-        const result = await auth.createUser({
-          username: req.body.username,
-          password: req.body.password,
-        });
-        if (result.status === "taken") {
-          res.status(409).json({ error: "Username is already taken" });
-          return;
-        }
-        res.status(201).json({ user: result.user });
-      } catch (error) {
-        next(error);
-      }
-    },
-  );
-
-  app.put(
-    "/api/admin/users/:userId/password",
-    requireAuth,
-    requireAdmin,
-    async (req, res, next) => {
-      try {
-        const password = isPlainObject(req.body) ? req.body.password : null;
-        if (!isValidPassword(password)) {
-          res
-            .status(400)
-            .json({ error: "A password of at least 8 characters is required" });
-          return;
-        }
-        const result = await auth.resetPassword({
-          userId: String(req.params.userId),
-          newPassword: password,
-        });
-        if (result.status !== "changed") {
-          res.status(404).json({ error: "Account not found" });
-          return;
-        }
-        res.status(204).end();
-      } catch (error) {
-        next(error);
-      }
-    },
-  );
-
-  app.post("/api/auth/login", async (req, res, next) => {
-    try {
-      if (!isPlainObject(req.body)) {
-        res.status(400).json({ error: "A username and password are required" });
-        return;
-      }
-      const throttleKey = `${req.ip}:${String(req.body.username).toLowerCase()}`;
-      const ipKey = `ip:${req.ip}`;
-      const throttle = loginThrottle.check(throttleKey);
-      const ipThrottle = loginIpThrottle.check(ipKey);
-      if (!ipThrottle.allowed) {
-        res.setHeader("Retry-After", String(ipThrottle.retryAfterSeconds));
-        res.status(429).json({ error: "Too many attempts. Try again later." });
-        return;
-      }
-      if (!throttle.allowed) {
-        res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
-        res.status(429).json({ error: "Too many attempts. Try again later." });
-        return;
-      }
-      const user = credentials(req.body)
-        ? await auth.verifyCredentials(req.body)
-        : null;
-      if (!user) {
-        loginThrottle.fail(throttleKey);
-        loginIpThrottle.fail(ipKey);
-        res.status(401).json({ error: "Invalid username or password" });
-        return;
-      }
-      loginThrottle.succeed(throttleKey);
-      startSession(req, res, user);
-      res.json({ user });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.post("/api/auth/logout", (req, res) => {
-    auth.deleteSession(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
-    res.setHeader("Set-Cookie", clearedSessionCookie({ secure: req.secure }));
-    res.status(204).end();
-  });
-
-  app.get("/api/auth/me", requireAuth, (req, res) =>
-    res.json({ user: req.user }),
-  );
-
-  app.post("/api/auth/password", requireAuth, async (req, res, next) => {
-    try {
-      const body = isPlainObject(req.body) ? req.body : {};
-      if (
-        typeof body.currentPassword !== "string" ||
-        !isValidPassword(body.newPassword)
-      ) {
-        res.status(400).json({
-          error:
-            "The current password and a new password of at least 8 characters are required",
-        });
-        return;
-      }
-      const throttleKey = `password:${req.user.id}`;
-      const throttle = passwordThrottle.check(throttleKey);
-      if (!throttle.allowed) {
-        res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
-        res.status(429).json({ error: "Too many attempts. Try again later." });
-        return;
-      }
-      const result = await auth.changePassword({
-        userId: req.user.id,
-        currentPassword: body.currentPassword,
-        newPassword: body.newPassword,
-        keepToken: parseCookies(req.headers.cookie)[SESSION_COOKIE],
-      });
-      if (result.status === "invalid_password") {
-        passwordThrottle.fail(throttleKey);
-        res.status(403).json({ error: "The current password is incorrect" });
-        return;
-      }
-      if (result.status !== "changed") {
-        res.status(404).json({ error: "Account not found" });
-        return;
-      }
-      passwordThrottle.succeed(throttleKey);
-      res.status(204).end();
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.get("/api/diagrams", requireAuth, (req, res) =>
-    res.json({ diagrams: store.list(req.user.id) }),
-  );
-  app.post("/api/diagrams", requireAuth, (req, res, next) => {
-    try {
-      if (!validPayload(req.body)) {
-        res
-          .status(400)
-          .json({ error: "A valid name and document are required" });
-        return;
-      }
-      const requestedId = req.body.id;
-      const id = requestedId ?? crypto.randomUUID();
-      if (!DIAGRAM_ID_PATTERN.test(id)) {
-        res.status(400).json({ error: "Invalid diagram ID" });
-        return;
-      }
-      if (store.get(id)) {
-        res.status(409).json({ error: "Diagram already exists" });
-        return;
-      }
-      res
-        .status(201)
-        .json(store.create({ ...req.body, id, ownerId: req.user.id }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.get("/api/diagrams/:id", requireAuth, validId, (req, res) => {
-    const diagram = store.get(req.params.id);
-    if (!diagram) res.status(404).json({ error: "Diagram not found" });
-    else res.json(diagram);
-  });
-  app.put("/api/diagrams/:id", requireAuth, validId, (req, res) => {
-    if (!validPayload(req.body) || !Number.isInteger(req.body.baseVersion)) {
-      res.status(400).json({
-        error: "A valid name, document, and baseVersion are required",
-      });
-      return;
-    }
-    const result = store.updateSnapshot({ id: req.params.id, ...req.body });
-    if (result.status === "not_found")
-      res.status(404).json({ error: "Diagram not found" });
-    else if (result.status === "conflict") {
-      res
-        .status(409)
-        .json({ error: "Version conflict", diagram: result.diagram });
-    } else res.json(result.diagram);
-  });
-  app.delete("/api/diagrams/:id", requireAuth, validId, (req, res) => {
-    const diagram = store.get(req.params.id);
-    if (!diagram) {
-      res.status(404).json({ error: "Diagram not found" });
-      return;
-    }
-    // Anyone with the link may edit, but only the owner may delete.
-    if (diagram.owner_id && diagram.owner_id !== req.user.id) {
-      res.status(403).json({ error: "Only the owner can delete this diagram" });
-      return;
-    }
-    store.delete(req.params.id);
-    res.status(204).end();
-  });
-
-  // Repository sync. Anyone who can edit a diagram may push it or pull it back,
-  // but only the owner may point it at a repository, because the settings carry
-  // a credential.
-  const withDiagram = (req, res, next) => {
-    const diagram = store.get(req.params.id);
-    if (!diagram) {
-      res.status(404).json({ error: "Diagram not found" });
-      return;
-    }
-    req.diagram = diagram;
-    next();
-  };
-  const requireDiagramOwner = (req, res, next) => {
-    if (req.diagram.owner_id && req.diagram.owner_id !== req.user.id) {
-      res
-        .status(403)
-        .json({ error: "Only the owner can configure repository sync" });
-      return;
-    }
-    next();
-  };
-  const gitRoute = (handler) => async (req, res, next) => {
-    try {
-      await handler(req, res);
-    } catch (error) {
-      if (isGitError(error)) {
-        res.status(error.status).json({ error: error.message });
-        return;
-      }
-      next(error);
-    }
-  };
-  const gitGuards = [requireAuth, validId, withDiagram];
-
-  app.get(
-    "/api/diagrams/:id/git",
-    ...gitGuards,
-    gitRoute(async (req, res) => {
-      res.json({
-        available: await isGitAvailable(),
-        canConfigure:
-          !req.diagram.owner_id || req.diagram.owner_id === req.user.id,
-        settings: gitSync.settings(req.params.id),
-      });
-    }),
-  );
-
-  app.put(
-    "/api/diagrams/:id/git",
-    ...gitGuards,
-    requireDiagramOwner,
-    gitRoute(async (req, res) => {
-      const settings = await gitSync.save(req.params.id, req.body ?? {}, {
-        diagramName: req.diagram.name,
-      });
-      res.json({ settings });
-    }),
-  );
-
-  app.delete(
-    "/api/diagrams/:id/git",
-    ...gitGuards,
-    requireDiagramOwner,
-    gitRoute(async (req, res) => {
-      gitSync.delete(req.params.id);
-      res.status(204).end();
-    }),
-  );
-
-  app.post(
-    "/api/diagrams/:id/git/test",
-    ...gitGuards,
-    gitRoute(async (req, res) => {
-      res.json(await gitSync.test(req.params.id));
-    }),
-  );
-
-  app.get(
-    "/api/diagrams/:id/git/history",
-    ...gitGuards,
-    gitRoute(async (req, res) => {
-      res.json(await gitSync.history(req.params.id));
-    }),
-  );
-
-  app.post(
-    "/api/diagrams/:id/git/push",
-    ...gitGuards,
-    gitRoute(async (req, res) => {
-      const body = isPlainObject(req.body) ? req.body : {};
-      res.json(
-        await gitSync.push(req.params.id, {
-          sql: typeof body.sql === "string" ? body.sql : undefined,
-          message: body.message,
-          user: req.user,
-        }),
-      );
-    }),
-  );
-
-  app.post(
-    "/api/diagrams/:id/git/pull",
-    ...gitGuards,
-    gitRoute(async (req, res) => {
-      const pulled = await gitSync.pull(req.params.id);
-      const result = store.updateSnapshot({
-        id: req.params.id,
-        name: pulled.name ?? req.diagram.name,
-        document: pulled.document,
-        baseVersion: req.diagram.version,
-      });
-      if (result.status !== "updated") {
-        res.status(409).json({
-          error: "The diagram changed while it was being pulled. Try again.",
-          diagram: result.diagram,
-        });
-        return;
-      }
-      // Everyone with the diagram open is holding the pre-pull snapshot.
-      websocket.broadcastSnapshot(req.params.id, result.diagram);
-      res.json({
-        diagram: result.diagram,
-        commit: pulled.commit,
-        file: pulled.file,
-      });
-    }),
+  // Unknown API paths are errors, not the single-page app.
+  app.all("/api/*splat", (_req, res) =>
+    res.status(404).json({ error: "Not found" }),
   );
 
   const sourceArchive =
@@ -705,19 +295,33 @@ export function createApplication({
   });
 
   const server = http.createServer(app);
-  const websocket = attachCollaborationServer(server, store, auth);
+  websocket = attachCollaborationServer(server, { store, auth, diagrams });
 
   const OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
   const sweep = () => {
     auth.pruneExpiredSessions();
     store.pruneOperations(new Date(Date.now() - OPERATION_RETENTION_MS));
+    audit.prune();
   };
   sweep();
   const sessionSweep = setInterval(sweep, 60 * 60 * 1000);
   sessionSweep.unref();
-  server.on("close", () => clearInterval(sessionSweep));
+  backups.start();
+  server.on("close", () => {
+    clearInterval(sessionSweep);
+    backups.stop();
+  });
 
-  return { app, server, websocket, database, store, auth };
+  return {
+    app,
+    server,
+    websocket,
+    database,
+    store,
+    auth,
+    audit,
+    backups,
+  };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

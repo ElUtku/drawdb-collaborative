@@ -455,11 +455,24 @@ test("diagram listing is scoped to the owner and only owners delete", async (t) 
   ]);
   assert.deepEqual(await listFor(otherCookie), ["legacy-diagram"]);
 
-  // Link sharing: a non-owner can still open and edit the diagram.
+  // New diagrams are private until their owner shares them.
+  const blocked = await fetch(`${base}/api/diagrams/owned-diagram`, {
+    headers: { Cookie: otherCookie },
+  });
+  assert.equal(blocked.status, 403);
+  const shared = await fetch(`${base}/api/diagrams/owned-diagram/access`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Cookie: ownerCookie },
+    body: JSON.stringify({ linkAccess: "editor" }),
+  });
+  assert.equal(shared.status, 200);
+
+  // Link sharing: a non-owner can now open and edit the diagram.
   const read = await fetch(`${base}/api/diagrams/owned-diagram`, {
     headers: { Cookie: otherCookie },
   });
   assert.equal(read.status, 200);
+  assert.equal((await read.json()).role, "editor");
   const edit = await fetch(`${base}/api/diagrams/owned-diagram`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", Cookie: otherCookie },

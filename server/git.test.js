@@ -380,6 +380,17 @@ test("repository settings are owner-only and never leak the token", async (t) =>
     body: JSON.stringify({ username: "member", password: PASSWORD }),
   });
   const memberCookie = login.headers.get("set-cookie").split(";")[0];
+  const memberId = (await login.json()).user.id;
+  // Diagrams are private until shared; make "member" an editor of this one.
+  const shared = await fetch(
+    `${base}/api/diagrams/${diagram.id}/members/${memberId}`,
+    {
+      method: "PUT",
+      headers: authed,
+      body: JSON.stringify({ role: "editor" }),
+    },
+  );
+  assert.equal(shared.status, 200);
 
   const settings = JSON.stringify({
     remoteUrl: "https://github.com/acme/schema.git",
@@ -409,6 +420,7 @@ test("repository settings are owner-only and never leak the token", async (t) =>
   });
   const state = await visible.json();
   assert.equal(state.canConfigure, false);
+  assert.equal(state.canSync, true);
   assert.equal(state.settings.remoteUrl, "https://github.com/acme/schema.git");
 
   const anonymous = await fetch(`${base}/api/diagrams/${diagram.id}/git`);

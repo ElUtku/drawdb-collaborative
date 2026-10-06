@@ -124,13 +124,17 @@ export function createAuthStore(db) {
           username: row.username,
           isAdmin: row.is_admin === 1,
           createdAt: row.created_at,
+          disabled: Boolean(row.disabled_at),
+          lastLoginAt: row.last_login_at ?? null,
         }
       : null;
+  const USER_COLUMNS =
+    "id, username, is_admin, created_at, disabled_at, last_login_at";
   const selectUserById = db.prepare(
-    "SELECT id, username, is_admin, created_at FROM users WHERE id = ?",
+    `SELECT ${USER_COLUMNS} FROM users WHERE id = ?`,
   );
   const selectUserByUsername = db.prepare(
-    "SELECT id, username, password_hash, is_admin, created_at FROM users WHERE username = ? COLLATE NOCASE",
+    `SELECT ${USER_COLUMNS}, password_hash FROM users WHERE username = ? COLLATE NOCASE`,
   );
   const selectSession = db.prepare(
     "SELECT token_hash, user_id, expires_at FROM sessions WHERE token_hash = ?",
@@ -158,11 +162,70 @@ export function createAuthStore(db) {
 
     listUsers() {
       return db
-        .prepare(
-          "SELECT id, username, is_admin, created_at FROM users ORDER BY created_at",
-        )
+        .prepare(`SELECT ${USER_COLUMNS} FROM users ORDER BY created_at`)
         .all()
         .map(publicUser);
+    },
+
+    /** Accounts others can share diagrams with: enabled ones, by name. */
+    directory() {
+      return db
+        .prepare(
+          "SELECT id, username FROM users WHERE disabled_at IS NULL ORDER BY username COLLATE NOCASE",
+        )
+        .all();
+    },
+
+    /** Blocks or unblocks sign-in; a blocked account loses its sessions. */
+    setDisabled(userId, disabled) {
+      const user = selectUserById.get(userId);
+      if (!user) return { status: "not_found" };
+      if (user.is_admin === 1) return { status: "is_admin" };
+      db.transaction(() => {
+        db.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(
+          disabled ? new Date().toISOString() : null,
+          userId,
+        );
+        if (disabled) {
+          db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+        }
+      })();
+      return {
+        status: "changed",
+        user: publicUser(selectUserById.get(userId)),
+      };
+    },
+
+    /**
+     * Removes an account. Its diagrams go to `transferTo` (they are never
+     * deleted with it); its sessions and memberships go with the account.
+     */
+    deleteUser(userId, { transferTo }) {
+      const user = selectUserById.get(userId);
+      if (!user) return { status: "not_found" };
+      if (user.is_admin === 1) return { status: "is_admin" };
+      const heir = selectUserById.get(transferTo);
+      if (!heir || heir.id === userId || heir.disabled_at) {
+        return { status: "invalid_transfer" };
+      }
+      const moved = db.transaction(() => {
+        const ids = db
+          .prepare("SELECT id FROM diagrams WHERE owner_id = ?")
+          .all(userId)
+          .map((row) => row.id);
+        db.prepare("UPDATE diagrams SET owner_id = ? WHERE owner_id = ?").run(
+          heir.id,
+          userId,
+        );
+        // The heir owns them now, so a membership of theirs is redundant.
+        const dropMembership = db.prepare(
+          "DELETE FROM diagram_members WHERE diagram_id = ? AND user_id = ?",
+        );
+        for (const id of ids) dropMembership.run(id, heir.id);
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        return ids;
+      })();
+      return { status: "deleted", user: publicUser(user), diagrams: moved };
     },
 
     async createUser({
@@ -196,6 +259,8 @@ export function createAuthStore(db) {
       const stored = row?.password_hash || DUMMY_HASH;
       const matches = await verifyPassword(password, stored);
       if (!row || !matches) return null;
+      // Disabled accounts are only reported to someone who knows the password.
+      if (row.disabled_at) return { ...publicUser(row), disabled: true };
       if (needsRehash(row.password_hash)) {
         const upgraded = await hashPassword(password);
         db.prepare(
@@ -251,6 +316,10 @@ export function createAuthStore(db) {
     createSession(userId) {
       const token = crypto.randomBytes(32).toString("base64url");
       const now = Date.now();
+      db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(
+        new Date(now).toISOString(),
+        userId,
+      );
       db.prepare(
         "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
       ).run(
@@ -273,7 +342,7 @@ export function createAuthStore(db) {
         return null;
       }
       const user = publicUser(selectUserById.get(session.user_id));
-      if (!user) {
+      if (!user || user.disabled) {
         db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
         return null;
       }

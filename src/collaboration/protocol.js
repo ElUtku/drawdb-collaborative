@@ -14,6 +14,7 @@ export const MESSAGE_TYPES = Object.freeze({
   TABLE_LOCK_RENEW: "table_lock_renew",
   TABLE_LOCK_RELEASE: "table_lock_release",
   TABLE_LOCK_STATE: "table_lock_state",
+  ACCESS: "access",
   ERROR: "error",
   PING: "ping",
   PONG: "pong",
