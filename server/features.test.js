@@ -799,10 +799,32 @@ test("a busy session is saved at most once per interval and the history is cappe
   history = await api("GET", `/api/diagrams/${diagram.id}/versions`, {
     cookie: owner.cookie,
   });
-  assert.equal(history.data.versions.length, 3);
+  // Named versions and the first one are kept beyond the limit.
   assert.deepEqual(
-    history.data.versions.map((v) => v.title),
-    ["c", "b", "a"],
+    history.data.versions.map((v) => v.title ?? v.label),
+    ["c", "b", "a", "created"],
+  );
+  // Restores add versions; only the last three of those are kept.
+  for (let i = 0; i < 4; i++) {
+    const restored = await api(
+      "POST",
+      `/api/diagrams/${diagram.id}/versions/1/restore`,
+      { cookie: owner.cookie },
+    );
+    assert.equal(restored.status, 200);
+  }
+  history = await api("GET", `/api/diagrams/${diagram.id}/versions`, {
+    cookie: owner.cookie,
+  });
+  const kept = history.data.versions.filter(
+    (v) => v.label !== "named" && v.label !== "created",
+  );
+  assert.equal(kept.length, 3);
+  assert.deepEqual(
+    history.data.versions
+      .filter((v) => v.label === "named" || v.label === "created")
+      .map((v) => v.title ?? v.label),
+    ["c", "b", "a", "created"],
   );
 });
 
@@ -1093,4 +1115,26 @@ test("backups are taken, listed, downloaded and pruned", async (t) => {
     ).status,
     404,
   );
+});
+
+test("the source page offers the source archive and the SBOM", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawdb-source-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archive = path.join(dir, "drawdb-collaborative-source.tar.gz");
+  fs.writeFileSync(archive, "archive");
+  fs.writeFileSync(
+    path.join(dir, "sbom.cdx.json"),
+    JSON.stringify({ bomFormat: "CycloneDX", components: [] }),
+  );
+  const { api } = await startInstance(t, { env: { SOURCE_ARCHIVE: archive } });
+  const page = await api("GET", "/source");
+  assert.match(
+    page.text,
+    /href="\/source\/drawdb-collaborative-source\.tar\.gz"/,
+  );
+  assert.match(page.text, /href="\/source\/sbom\.cdx\.json"/);
+  const sbom = await api("GET", "/source/sbom.cdx.json");
+  assert.equal(sbom.status, 200);
+  assert.match(sbom.response.headers.get("content-type"), /cyclonedx/);
+  assert.equal(sbom.data.bomFormat, "CycloneDX");
 });

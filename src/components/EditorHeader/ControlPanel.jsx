@@ -73,6 +73,7 @@ import { loadExportOptions } from "../../utils/exportPreferences";
 import { databases } from "../../data/databases";
 import { jsonToMermaid } from "../../utils/exportAs/mermaid";
 import { generateProtobuf } from "../../utils/exportAs/protobuf";
+import { generateCpp } from "../../utils/exportAs/cpp";
 import { isRtl } from "../../i18n/utils/rtl";
 import { jsonToDocumentation } from "../../utils/exportAs/documentation";
 import { IdContext } from "../Workspace";
@@ -1188,6 +1189,10 @@ export default function ControlPanel({
           exportSource(database);
         },
       },
+      export_migration: {
+        function: () => setModal(MODAL.HISTORY),
+        disabled: !storedDiagram,
+      },
       export_as: {
         children: [
           {
@@ -1342,6 +1347,30 @@ export default function ControlPanel({
                 protoSource: source,
                 protoOptions,
                 protoIssues: issues,
+              }));
+            },
+          },
+          {
+            name: "C++",
+            function: () => {
+              openExportModal(MODAL.CODE);
+              const source = {
+                tables,
+                references: relationships,
+                database,
+                title,
+                ...(databases[database].hasTypes && { types }),
+                ...(databases[database].hasEnums && { enums }),
+              };
+              const cppOptions = loadExportOptions("cpp");
+              const { code, issues } = generateCpp(source, cppOptions);
+              setExportData((prev) => ({
+                ...prev,
+                data: code,
+                extension: "hpp",
+                cppSource: source,
+                cppOptions,
+                cppIssues: issues,
               }));
             },
           },

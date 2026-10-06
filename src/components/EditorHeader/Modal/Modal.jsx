@@ -50,6 +50,12 @@ import {
   PROTO_OPTION_DEFS,
 } from "../../../utils/exportAs/protobuf";
 import {
+  CPP_OPTION_DEFS,
+  defaultCppOptions,
+  formatCppIssue,
+  generateCpp,
+} from "../../../utils/exportAs/cpp";
+import {
   defaultMigrationOptions,
   defaultSqlOptions,
   formatIssue,
@@ -70,6 +76,7 @@ const extensionToLanguage = {
   dbml: "dbml",
   json: "json",
   proto: "proto",
+  hpp: "cpp",
 };
 
 const extensionToMimeType = {
@@ -314,7 +321,7 @@ export default function Modal({
     (exportData.extension === "sql" &&
       (exportData.sqlSource || exportData.migrationSource)) ||
       (exportData.extension === "proto" && exportData.protoSource) ||
-      (exportData.extension === "cpp" && exportData.cppSource),
+      (exportData.extension === "hpp" && exportData.cppSource),
   );
 
   // Rebuilds the migration script for a dialect and settings.
@@ -478,6 +485,50 @@ export default function Modal({
                           exportData.migrationDialect,
                           migrationOptions,
                         );
+                      }}
+                    />
+                  </>
+                )}
+              {modal === MODAL.CODE &&
+                exportData.extension === "hpp" &&
+                exportData.cppSource && (
+                  <>
+                    <ExportIssues
+                      issues={exportData.cppIssues}
+                      prefix="cpp_issue"
+                      format={formatCppIssue}
+                    />
+                    <ExportOptions
+                      prefix="cpp_opt"
+                      defs={CPP_OPTION_DEFS.map((def) =>
+                        def.key === "namespaceName"
+                          ? {
+                              ...def,
+                              placeholder:
+                                generateCpp(exportData.cppSource).code.match(
+                                  /^namespace (\S+) \{$/m,
+                                )?.[1] ?? "",
+                            }
+                          : def,
+                      )}
+                      values={{
+                        ...defaultCppOptions,
+                        ...exportData.cppOptions,
+                      }}
+                      onChange={(cppOptions) => {
+                        saveExportOptions("cpp", cppOptions);
+                        setExportData((prev) => {
+                          const { code, issues } = generateCpp(
+                            prev.cppSource,
+                            cppOptions,
+                          );
+                          return {
+                            ...prev,
+                            cppOptions,
+                            data: code,
+                            cppIssues: issues,
+                          };
+                        });
                       }}
                     />
                   </>

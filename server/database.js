@@ -252,10 +252,15 @@ export function createDiagramStore(
        title = COALESCE(excluded.title, diagram_versions.title),
        label = COALESCE(diagram_versions.label, excluded.label)`,
   );
+  // The limit applies to versions saved while editing; the first version and
+  // the ones people named are kept.
   const pruneVersions = db.prepare(
-    `DELETE FROM diagram_versions WHERE diagram_id = ? AND version NOT IN (
-       SELECT version FROM diagram_versions WHERE diagram_id = ?
-       ORDER BY version DESC LIMIT ?)`,
+    `DELETE FROM diagram_versions
+      WHERE diagram_id = ? AND COALESCE(label, '') NOT IN ('named', 'created')
+        AND version NOT IN (
+          SELECT version FROM diagram_versions
+           WHERE diagram_id = ? AND COALESCE(label, '') NOT IN ('named', 'created')
+           ORDER BY version DESC LIMIT ?)`,
   );
 
   /** Stores the diagram as it is now in its history. */

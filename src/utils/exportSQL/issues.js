@@ -5,6 +5,28 @@
 // the fallback.
 
 export const ISSUE_MESSAGES = {
+  migration_no_changes: "Both versions define the same schema.",
+  migration_drop_table: "{{table}} is dropped with all its rows.",
+  migration_drop_column:
+    "{{table}}.{{column}} is dropped with the data it holds.",
+  migration_not_null_no_default:
+    "{{table}}.{{column}} is added as NOT NULL without a default: it fails if the table has rows. Give it a default, or add it as nullable, fill it and then make it NOT NULL.",
+  migration_set_not_null:
+    "{{table}}.{{column}} becomes NOT NULL: it fails if a row holds NULL there.",
+  migration_type_change:
+    "{{table}}.{{column}} changes from {{from}} to {{to}}: values that do not convert make it fail.",
+  migration_oracle_type_change:
+    "{{table}}.{{column}}: Oracle only narrows or changes the type of an empty column.",
+  migration_identity_manual:
+    "{{table}}.{{column}}: {{dialect}} cannot add or remove an identity on an existing column; the table has to be recreated by hand.",
+  migration_enum_values_removed:
+    "{{name}} loses {{values}}: rows that use them make the migration fail.",
+  migration_sqlite_rebuild:
+    "SQLite cannot change {{table}} in place: it is rebuilt (new table, rows copied, old table dropped).",
+  migration_sqlite_rebuild_skipped:
+    "Rebuilding {{table}} drops columns, so it is written as comments while drops are off.",
+  migration_inherits_manual:
+    "The tables {{table}} inherits from changed; change INHERITS by hand.",
   empty_table_name: "A table has no name; it was exported as {{table}}.",
   empty_column_name:
     "A column of {{table}} has no name; it was exported as {{column}}.",

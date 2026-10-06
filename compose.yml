@@ -17,6 +17,13 @@ services:
       GIT_SYNC_ENABLED: ${GIT_SYNC_ENABLED:-true}
       GIT_ALLOWED_HOSTS: ${GIT_ALLOWED_HOSTS:-}
       GIT_SECRET_KEY: ${GIT_SECRET_KEY:-}
+      DEFAULT_LINK_ACCESS: ${DEFAULT_LINK_ACCESS:-none}
+      HISTORY_INTERVAL_MINUTES: ${HISTORY_INTERVAL_MINUTES:-10}
+      HISTORY_LIMIT: ${HISTORY_LIMIT:-200}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
+      BACKUP_DIR: ${BACKUP_DIR:-/data/backups}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
     volumes:
       - drawdb-data:/data
     # Hardening: the app only writes to /data, so everything else is read-only.

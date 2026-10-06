@@ -21,6 +21,11 @@ RUN mkdir -p source \
   && tar --exclude=./node_modules --exclude=./dist --exclude=./source \
     --exclude=./data -czf /tmp/source.tar.gz . \
   && mv /tmp/source.tar.gz source/drawdb-collaborative-source.tar.gz
+# Software bill of materials (CycloneDX) of what runs in the image, also
+# served at /source; the build stops if a dependency is not free software.
+RUN npm sbom --sbom-format cyclonedx --omit dev --sbom-type application \
+    > source/sbom.cdx.json \
+  && node scripts/check-licenses.mjs source/sbom.cdx.json
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm run build && npm prune --omit=dev
 

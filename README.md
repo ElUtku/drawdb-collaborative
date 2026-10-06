@@ -13,11 +13,18 @@ preparado para autoalojarse, incluso en servidores sin Internet.
 
 - Varios usuarios editando el mismo diagrama a la vez, con cursores y nombres.
 - Cuentas de usuario: las crea el administrador o, si se activa, cada usuario se registra solo.
-- Diagramas guardados en el servidor (SQLite).
+  El administrador puede desactivarlas o eliminarlas.
+- Permisos por diagrama: propietario, editores y lectores (solo lectura).
+- Diagramas guardados en el servidor (SQLite), con **historial de versiones**: comparar,
+  restaurar y nombrar versiones.
 - Exportación de SQL para MySQL, MariaDB, PostgreSQL, SQLite, SQL Server y Oracle, con opciones
-  configurables y revisión previa de los problemas (ver [Exportar SQL](#exportar-sql)).
-- Exportación a Protobuf (`.proto`) con numeración de campos estable
-  (ver [Exportar Protobuf](#exportar-protobuf)).
+  configurables y revisión previa de los problemas (ver [Exportar SQL](#exportar-sql)), y
+  **migraciones `ALTER TABLE`** entre dos versiones (ver [Migraciones](#migraciones-entre-versiones)).
+- Exportación a **C++** (structs con `std::optional`, enums y, opcionalmente, tablas sqlpp11 y
+  conversiones SOCI; ver [Exportar C++](#exportar-c)) y a **Protobuf** con numeración de
+  campos estable (ver [Exportar Protobuf](#exportar-protobuf)).
+- Tipos de columna personalizados compartidos por todo el servidor.
+- Registro de actividad, copias de seguridad automáticas y lista de componentes (SBOM).
 - Sincronización opcional de cada diagrama con un repositorio Git.
 - **No hace peticiones a Internet:** sin telemetría, CDNs ni contenidos incrustados; iconos,
   editor, código fuente y licencias van dentro de la propia instancia. La única excepción es la
@@ -54,6 +61,13 @@ Si necesitas cambiar algo, copia `.env.example` a `.env` y edítalo antes de arr
 | `GIT_SYNC_ENABLED` | `true` | Ponla a `false` para desactivar la sincronización con Git. |
 | `GIT_ALLOWED_HOSTS` | *(vacía)* | Recomendada si usas Git: servidores permitidos, separados por comas (admite `*.dominio`). Vacía permite cualquiera, y cualquier usuario podría hacer que el servidor conecte con otros equipos de la red. |
 | `GIT_SECRET_KEY` | *(vacía)* | Recomendada si usas Git. Cifra los tokens de acceso; sin ella, la clave de cifrado se guarda en la propia base de datos. Genera una con `openssl rand -hex 32`. |
+| `DEFAULT_LINK_ACCESS` | `none` | Quién puede abrir un diagrama nuevo además de su dueño y las personas con las que se comparte: `none`, `viewer` (cualquier cuenta lo ve) o `editor` (cualquier cuenta lo edita). El dueño lo cambia luego en **Compartir**. |
+| `HISTORY_INTERVAL_MINUTES` | `10` | Cada cuántos minutos de edición se guarda una versión en el historial. |
+| `HISTORY_LIMIT` | `200` | Versiones que se conservan por diagrama (las nombradas y la de creación no se borran). |
+| `AUDIT_RETENTION_DAYS` | `365` | Días que se conserva el registro de actividad. |
+| `BACKUP_DIR` | `/data/backups` | Carpeta de las copias automáticas. Mejor en otro disco o volumen que la base de datos. |
+| `BACKUP_INTERVAL_HOURS` | `24` | Cada cuántas horas se hace una copia. `0` = solo copias manuales desde el panel. |
+| `BACKUP_KEEP` | `14` | Copias que se conservan; las más antiguas se borran. |
 
 Después de cambiar el `.env`, ejecuta `podman compose up -d` para aplicarlo.
 
@@ -131,10 +145,22 @@ lectura (salvo `/data`), sin *capabilities* y con un *healthcheck*.
   próxima vez que su dueño inicia sesión. Las sesiones también se guardan como hash. Ni el
   administrador puede ver contraseñas.
 - Los intentos de login fallidos se limitan por usuario y también por dirección IP.
-- Quien crea un diagrama es su dueño: lo ve en su lista y es el único que puede borrarlo o
-  configurar su sincronización con Git.
-- **Cualquier usuario con el enlace de un diagrama puede abrirlo y editarlo.** Comparte los
-  enlaces solo con quien deba tener acceso.
+- Quien crea un diagrama es su **propietario**. Desde **Archivo → Compartir** decide quién más
+  puede abrirlo: personas concretas como **editor** o **lector**, y/o cualquier cuenta del
+  servidor (sin acceso, lectura o edición; por defecto, sin acceso: ver `DEFAULT_LINK_ACCESS`).
+  También puede transferir la propiedad. Los cambios se aplican al momento a quien lo tenga
+  abierto: un lector ve los cambios en directo pero no puede editar, y quien pierde el acceso
+  sale del diagrama.
+- Solo el propietario puede borrar el diagrama, compartirlo, ver su actividad o configurar su
+  sincronización con Git. Los editores pueden editar, restaurar versiones y hacer push/pull.
+- El administrador ve y puede gestionar todos los diagramas. Los diagramas creados con
+  versiones anteriores, sin dueño, siguen abiertos para todos hasta que alguien los reclame.
+- En el panel de administración (**Usuarios**) se puede **desactivar** una cuenta (cierra sus
+  sesiones y bloquea el acceso, sin borrar nada) o **eliminarla** pasando sus diagramas a otra
+  persona. También se ve la fecha del último acceso de cada cuenta.
+- La pestaña **Actividad** del panel registra inicios de sesión (también los fallidos), cambios
+  de cuentas y de permisos, ediciones, restauraciones, copias de seguridad, etc., con fecha, IP
+  y usuario, filtrable por persona y tipo de acción.
 - No hay recuperación de contraseña por correo. Si un usuario olvida la suya, el administrador
   le pone una nueva desde el panel (**Restablecer contraseña**) y el usuario la cambia después.
 - Si se pierde la cuenta de administrador, se recupera por SQL:
@@ -167,6 +193,60 @@ opciones (1.598 scripts; los únicos rechazos son los que el diálogo ya marca c
 Límites conocidos: las expresiones `CHECK` y los valores por defecto con funciones se copian tal
 cual (en un diagrama genérico deben usar funciones que existan en el motor de destino); y con
 **Oracle** anterior a 23ai no se pueden usar `JSON`, `VECTOR` ni `BOOLEAN` nativo.
+
+## Historial de versiones
+
+**Archivo → Historial de versiones** muestra las versiones guardadas del diagrama (una cada
+`HISTORY_INTERVAL_MINUTES` de edición, más la de creación, las restauraciones y las que se
+guardan con nombre, por ejemplo «1.0 publicada»). Al elegir una se ve qué ha cambiado desde
+ella hasta ahora (tablas, columnas, relaciones, enums) y se puede **restaurar** para todos los
+que tengan el diagrama abierto; el estado anterior queda guardado, así que se puede deshacer.
+Las versiones se guardan comprimidas en el propio servidor.
+
+## Migraciones entre versiones
+
+Desde el historial (o **Archivo → Exportar migración SQL**), **Migración SQL hasta ahora**
+genera las sentencias `ALTER` que llevan una base de datos creada con esa versión al diagrama
+actual, para el mismo motor y con las mismas opciones que la exportación SQL:
+
+- Tablas y columnas renombradas se **renombran** (no se borran y recrean), incluso si dos
+  columnas intercambian sus nombres; cambian tipos, nulos, valores por defecto, identidades,
+  claves, índices, `CHECK`, FKs y comentarios; los enums de PostgreSQL ganan valores con
+  `ADD VALUE` o se sustituyen si se quitan valores.
+- El orden respeta las dependencias: primero se quitan las FKs y claves que cambian, luego se
+  tocan tablas y columnas, y al final se vuelven a crear claves y FKs.
+- **SQLite** no puede modificar casi nada de una tabla existente, así que la tabla se
+  reconstruye como indica su documentación (tabla nueva, copia de filas, borrado y renombrado).
+- La revisión avisa de lo que puede fallar con datos (una columna `NOT NULL` nueva sin valor
+  por defecto, tipos que no se pueden convertir…) y de lo que el motor no permite hacer sin
+  recrear la tabla (añadir o quitar una identidad en SQL Server u Oracle).
+- Con **Borrar tablas y columnas** desactivado, los `DROP` se escriben como comentarios.
+
+Las migraciones identifican claves y restricciones por su nombre, así que la base de datos debe
+haberse creado con **Nombrar restricciones** activado (la opción por defecto). Se han validado
+en los seis motores con datos en las tablas: 298 migraciones (añadir, borrar, renombrar y cambiar
+columnas y tablas, claves, índices, FKs, `CHECK`, identidades, comentarios, enums y todo a la
+vez), comparando después el catálogo de la base migrada con el de una base creada desde cero.
+
+## Exportar C++
+
+**Archivo → Exportar como → C++** genera una cabecera (`.hpp`, C++17 o C++20) con:
+
+- Un `struct` por tabla. Las columnas que admiten `NULL` son `std::optional<T>`; los tipos
+  siguen al motor (`std::int32_t`/`std::int64_t`, sin signo en MySQL, `double` o `std::string`
+  para `DECIMAL`, `std::chrono` o `std::tm` para fechas, `std::vector<std::uint8_t>` para
+  binarios…). Los valores `DEFAULT` literales inicializan los miembros.
+- Constantes con el nombre de la tabla, de cada columna y de la clave primaria para escribir SQL
+  sin errores tipográficos, y operadores `==`/`!=`.
+- `enum class` para las columnas `ENUM` y los tipos enum, con `to_string` y `from_string`.
+- Opcional: definiciones de tabla de **sqlpp11** (consultas con comprobación de tipos) y
+  conversiones de **SOCI** (`into(objeto)` y `use(objeto)` con filas completas), ambas
+  bibliotecas libres.
+
+Los nombres que no son válidos en C++ (palabras reservadas, espacios…) se corrigen y se avisa en
+la revisión. Se ha comprobado compilando con `-Wall -Wextra -Werror` la exportación de todos los
+diagramas de prueba de los seis motores con varias combinaciones de opciones, con sqlpp11 y
+SOCI 4.0, y escribiendo y leyendo filas reales en SQLite a través de ambas bibliotecas.
 
 ## Exportar Protobuf
 
@@ -219,23 +299,32 @@ podman compose up -d --build            # actualizar tras un git pull
 podman volume inspect drawdb-collaborative_drawdb-data   # ubicación de los datos
 ```
 
-**Copias de seguridad:** copia el contenido del volumen (`drawdb.sqlite` y la carpeta `git/`).
-Contiene todos los diagramas, los usuarios y los tokens cifrados.
+**Copias de seguridad:** el servidor hace una copia consistente de la base de datos cada
+`BACKUP_INTERVAL_HOURS` en `BACKUP_DIR` (por defecto `/data/backups`) y conserva las últimas
+`BACKUP_KEEP`. Desde el panel de administración (**Copias de seguridad**) se puede hacer una al
+momento y descargarla. Para protegerse de la pérdida del disco, monta `BACKUP_DIR` en otro
+volumen o cópialas fuera. Para restaurar, para el contenedor y sustituye `drawdb.sqlite` por la
+copia. La carpeta `git/` (repositorios de la sincronización con Git) puede volver a crearse.
 
 ## Desarrollo local
 
 ```bash
 npm install
 npm run dev          # servidor API + Vite con recarga en caliente
-npm test             # tests del servidor, de importación y de exportación SQL/Protobuf
+npm test             # tests del servidor, de importación y de exportación SQL/C++/Protobuf
 npm run lint
 npm run build
+npm run sbom         # lista de componentes (CycloneDX) de las dependencias de producción
+npm run check:licenses   # falla si alguna dependencia no es software libre
 ```
 
 `npm run test:engines` ejecuta el SQL generado en motores reales a través de sus clientes de
 línea de comandos (SQLite siempre; el resto si defines `SQL_PSQL`, `SQL_MYSQL`, `SQL_MARIADB`,
-`SQL_SQLCMD` o `SQL_SQLPLUS`; ver `scripts/sql-engines/run.js`). Los tests de Protobuf usan
-`protoc` si está instalado.
+`SQL_SQLCMD` o `SQL_SQLPLUS`; ver `scripts/sql-engines/run.js`). `npm run test:migrations` hace
+lo mismo con las migraciones (`scripts/sql-engines/migrate.js`). `npm run test:cpp` compila la
+exportación C++ con `g++`, y con sqlpp11 y SOCI si se indican sus rutas en `CPP_SQLPP11`,
+`CPP_DATE` y `CPP_SOCI` (ver `scripts/check-cpp.mjs`). Los tests de Protobuf usan `protoc` si
+está instalado.
 
 ## Licencias
 
@@ -249,7 +338,8 @@ cumple también sin Internet. El código de esta versión está en
 
 Todas las dependencias son software libre con licencias compatibles (MIT, Apache-2.0, BSD, ISC,
 MPL-2.0, OFL…); la compilación falla si aparece una que no lo sea, y sus textos de licencia se
-publican en **Ayuda → Licencias de terceros** (`/third-party-licenses.txt`). La imagen se basa
+publican en **Ayuda → Licencias de terceros** (`/third-party-licenses.txt`). La imagen incluye
+además la lista de componentes en formato CycloneDX (`/source/sbom.cdx.json`). La imagen se basa
 en Debian y Node.js (libres). Para construirla y ejecutarla basta con Podman o Docker Engine,
 ambos libres; Docker **Desktop** es un producto distinto con licencia de pago para algunas
 organizaciones y no es necesario.

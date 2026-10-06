@@ -121,16 +121,20 @@ function contentSecurityPolicy(req) {
 }
 
 const SOURCE_ARCHIVE_NAME = "drawdb-collaborative-source.tar.gz";
+const SBOM_NAME = "sbom.cdx.json";
 
 /**
  * AGPL-3.0 section 13: everyone who uses the program over the network may
  * get its source. The Docker image carries an archive of the exact source it
  * was built from, so this works on a server without Internet access too.
  */
-function sourcePage(hasArchive) {
+function sourcePage(hasArchive, hasSbom) {
   const download = hasArchive
     ? `<p><a href="/source/${SOURCE_ARCHIVE_NAME}">Download the source code of this server (.tar.gz)</a></p>`
     : "<p>This server was started without a source archive. The source is the one of the repository it was built from.</p>";
+  const sbom = hasSbom
+    ? `<p>Software bill of materials (CycloneDX): <a href="/source/${SBOM_NAME}">${SBOM_NAME}</a>.</p>`
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Source code</title></head>
@@ -138,6 +142,7 @@ function sourcePage(hasArchive) {
 <h1>Source code</h1>
 <p>This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License, version 3, as published by the Free Software Foundation. It comes with no warranty.</p>
 ${download}
+${sbom}
 <p>It is a modified version of drawDB (https://github.com/drawdb-io/drawdb). The licences of the libraries it includes are listed in <a href="/third-party-licenses.txt">third-party-licenses.txt</a>.</p>
 </body>
 </html>
@@ -263,9 +268,19 @@ export function createApplication({
   const sourceArchive =
     process.env.SOURCE_ARCHIVE ||
     path.resolve(__dirname, "../source", SOURCE_ARCHIVE_NAME);
+  const sbomFile = path.join(path.dirname(sourceArchive), SBOM_NAME);
   app.get("/source", (_req, res) => {
     res.setHeader("Cache-Control", "no-cache");
-    res.type("html").send(sourcePage(fs.existsSync(sourceArchive)));
+    res
+      .type("html")
+      .send(sourcePage(fs.existsSync(sourceArchive), fs.existsSync(sbomFile)));
+  });
+  app.get(`/source/${SBOM_NAME}`, (_req, res) => {
+    if (!fs.existsSync(sbomFile)) {
+      res.status(404).json({ error: "No SBOM on this server" });
+      return;
+    }
+    res.type("application/vnd.cyclonedx+json").sendFile(sbomFile);
   });
   app.get(`/source/${SOURCE_ARCHIVE_NAME}`, (_req, res) => {
     if (!fs.existsSync(sourceArchive)) {

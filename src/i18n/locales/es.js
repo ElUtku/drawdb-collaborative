@@ -623,7 +623,7 @@ const es = {
     upload_file: "Subir archivo",
     type_color: "Color",
     custom_types_description:
-      "Define tipos de datos personalizados que no están disponibles por defecto. Podrás usarlos al crear o editar columnas.",
+      "Define tipos de datos personalizados que no están disponibles por defecto. Se comparten con todas las personas de este servidor y se pueden usar al crear o editar columnas.",
     type_data_corrupted: "Los tipos configurados están dañados.",
     no_custom_types: "No tienes ningún tipo configurado",
     close: "Cerrar",
@@ -765,6 +765,252 @@ const es = {
       "La sincronización con repositorios no está disponible en este servidor (git no está instalado o está desactivada).",
     git_owner_only:
       "Solo el propietario del diagrama puede cambiar estos ajustes. Aun así puedes subir y traer cambios.",
+    access_revoked: "Ya no tienes acceso a este diagrama.",
+    access_now_viewer: "Ahora solo puedes ver este diagrama.",
+    access_now_editor: "Ya puedes editar este diagrama.",
+    no_access: "Sin acceso",
+    custom_types_save_failed:
+      "No se pudieron guardar los tipos personalizados.",
+    your_role: "Tu rol",
+    role_owner: "Propietario",
+    role_editor: "Editor",
+    role_viewer: "Lector",
+    role_none: "Sin acceso",
+    link_access: "Todas las cuentas de este servidor",
+    link_access_none: "Sin acceso",
+    link_access_viewer: "Pueden verlo",
+    link_access_editor: "Pueden editarlo",
+    link_access_none_desc:
+      "Solo el propietario y las personas de abajo pueden abrirlo.",
+    link_access_viewer_desc:
+      "Cualquiera con cuenta puede abrirlo en solo lectura; las personas de abajo mantienen su rol.",
+    link_access_editor_desc: "Cualquiera con cuenta puede abrirlo y editarlo.",
+    sharing_saved: "Permisos actualizados",
+    people_with_access: "Personas con acceso",
+    not_shared_yet: "Aún no se ha compartido con nadie.",
+    left_diagram: "Has salido del diagrama",
+    leave: "Salir",
+    remove: "Quitar",
+    share_with: "Compartir con",
+    pick_user: "Elige una persona",
+    no_more_users: "Todos tienen ya acceso",
+    transfer_ownership: "Transferir la propiedad",
+    transfer_ownership_confirm:
+      "El nuevo propietario decide quién puede abrirlo. Tú sigues como editor.",
+    transfer_ownership_desc:
+      "Pasa el diagrama a otra persona; tú puedes seguir editándolo.",
+    ownership_transferred: "Propiedad transferida",
+    transfer: "Transferir",
+    version_history: "Historial de versiones",
+    export_migration: "Exportar migración SQL (ALTER)…",
+    migration_current: "{{name}} tal como está ahora",
+    version_name_placeholder:
+      'Nombra la versión actual, p. ej. "1.0 publicada"',
+    name_version: "Guardar versión",
+    version_named: "Versión guardada",
+    version_restored: "Versión {{version}} restaurada",
+    history_empty: "Aún no hay versiones guardadas.",
+    history_pick: "Elige una versión para ver qué ha cambiado desde entonces.",
+    history_autosave: "Guardada al editar",
+    history_label_created: "Creación",
+    history_label_named: "Versión con nombre",
+    history_label_restored: "Tras una restauración",
+    history_label_before_change: "Antes de restaurar o traer",
+    history_label_git_pull: "Traída del repositorio",
+    history_tag_created: "creación",
+    history_tag_named: "con nombre",
+    history_tag_restored: "restaurada",
+    history_tag_before_change: "respaldo",
+    history_tag_git_pull: "pull",
+    history_edited_by: "editada por {{names}}",
+    history_changes_since: "Cambios de esta versión a {{name}}",
+    history_same: "El mismo esquema que ahora.",
+    history_tables_added: "Tablas añadidas",
+    history_tables_removed: "Tablas eliminadas",
+    history_table_changed: "Tabla modificada",
+    history_indexes: "índices o claves únicas",
+    history_relationships_added: "Relaciones añadidas",
+    history_relationships_removed: "Relaciones eliminadas",
+    history_relationships_changed: "Relaciones modificadas",
+    history_restore_confirm:
+      "El diagrama vuelve a la versión {{version}} para todos los que lo editan. El estado actual se guarda como versión, así que se puede deshacer.",
+    history_migration: "Migración SQL hasta ahora",
+    history_migration_desc:
+      "Sentencias ALTER que llevan una base de datos creada con esta versión al diagrama actual.",
+    activity: "Actividad",
+    activity_empty: "Aún no hay nada registrado.",
+    activity_system: "Sistema",
+    never: "nunca",
+    created: "Creada",
+    last_login: "Último acceso",
+    disabled: "Desactivada",
+    enable_user: "Activar",
+    disable_user: "Desactivar",
+    enable_user_confirm: "{{username}} podrá volver a iniciar sesión.",
+    disable_user_confirm:
+      "{{username}} sale de su sesión y no podrá entrar hasta que se active de nuevo. Sus diagramas se conservan.",
+    user_disabled_done: "{{username}} desactivada",
+    user_enabled_done: "{{username}} activada",
+    user_deleted_done_one: "{{username}} eliminada; 1 diagrama transferido",
+    user_deleted_done_other:
+      "{{username}} eliminada; {{count}} diagramas transferidos",
+    delete_user: "Eliminar cuenta",
+    delete_user_explain:
+      "{{username}} se elimina para siempre. Sus diagramas pasan a la persona que elijas y se quitan sus permisos compartidos.",
+    transfer_diagrams_to: "Pasar los diagramas a",
+    all_users: "Todas las personas",
+    all_actions: "Todas las acciones",
+    backups: "Copias de seguridad",
+    backups_explain:
+      "Copias de la base de datos hechas mientras el servidor funciona.",
+    back_up_now: "Hacer copia ahora",
+    backup_done: "Copia {{name}} creada",
+    no_backups: "Aún no hay copias.",
+    backups_off:
+      "Las copias están desactivadas: define BACKUP_DIR en el servidor para activarlas.",
+    sql_opt_destructive: "Borrar tablas y columnas",
+    sql_opt_destructive_desc:
+      "Desactivado: DROP TABLE y DROP COLUMN se escriben como comentarios y no se borra ningún dato.",
+    cpp_opt_namespaceName: "Namespace",
+    cpp_opt_namespaceName_desc:
+      "Namespace C++ de los structs; anidados con ::. Vacío: a partir del título del diagrama.",
+    cpp_opt_standard: "Estándar C++",
+    cpp_opt_standard_desc:
+      "C++20 añade == por defecto y std::chrono::sys_days para las fechas.",
+    cpp_opt_standard_cpp17: "C++17",
+    cpp_opt_standard_cpp20: "C++20",
+    cpp_opt_nullableAs: "Columnas que admiten NULL",
+    cpp_opt_nullableAs_desc:
+      "std::optional distingue NULL de un valor; un tipo simple no.",
+    cpp_opt_nullableAs_optional: "std::optional<T>",
+    cpp_opt_nullableAs_plain: "T simple",
+    cpp_opt_sqlpp11: "Tablas sqlpp11",
+    cpp_opt_sqlpp11_desc:
+      "Definiciones de tabla para consultas con tipos de sqlpp11 (como las escribe su herramienta ddl2cpp).",
+    cpp_opt_soci: "Conversiones SOCI",
+    cpp_opt_soci_desc:
+      "soci::type_conversion para cada struct, para que into() y use() trabajen con filas completas.",
+    cpp_opt_includeComments: "Comentarios",
+    cpp_opt_includeComments_desc:
+      "Comentarios de tablas y columnas, claves y referencias como comentarios ///.",
+    cpp_opt_typeCase: "Nombres de tipo",
+    cpp_opt_typeCase_desc:
+      "Cómo se convierten los nombres de tabla en nombres de struct.",
+    cpp_opt_typeCase_pascal: "PascalCase",
+    cpp_opt_typeCase_original: "Como en el diagrama",
+    cpp_opt_memberCase: "Nombres de miembros",
+    cpp_opt_memberCase_desc:
+      "Cómo se convierten las columnas en miembros. Los nombres de columna en SQL no cambian.",
+    cpp_opt_memberCase_original: "Como en el diagrama",
+    cpp_opt_memberCase_snake: "snake_case",
+    cpp_opt_memberCase_camel: "camelCase",
+    cpp_opt_singularTypes: "Nombres de tipo en singular",
+    cpp_opt_singularTypes_desc:
+      "customers → Customer, order_items → OrderItem.",
+    cpp_opt_typeSuffix: "Sufijo de tipo",
+    cpp_opt_typeSuffix_desc:
+      "Se añade a cada nombre de struct, p. ej. CustomerRow.",
+    cpp_opt_timeAs: "Fechas y horas",
+    cpp_opt_timeAs_desc:
+      "Puntos en el tiempo y duraciones de std::chrono (UTC), std::tm, o texto tal como lo escribe la base de datos.",
+    cpp_opt_timeAs_chrono: "std::chrono",
+    cpp_opt_timeAs_tm: "std::tm",
+    cpp_opt_timeAs_string: "std::string",
+    cpp_opt_decimalAs: "DECIMAL / NUMERIC",
+    cpp_opt_decimalAs_desc:
+      "double es cómodo pero inexacto a partir de 15 dígitos; std::string conserva el valor exacto.",
+    cpp_opt_decimalAs_double: "double",
+    cpp_opt_decimalAs_string: "std::string",
+    cpp_opt_enumClasses: "Enum class",
+    cpp_opt_enumClasses_desc:
+      "Columnas ENUM y tipos enum como enum class con to_string/from_string; desactivado: std::string.",
+    cpp_opt_columnNames: "Nombres de tabla y columna",
+    cpp_opt_columnNames_desc:
+      "Constantes kTable, Column::nombre, kColumns y kPrimaryKey para escribir SQL.",
+    cpp_opt_defaults: "Valores por defecto",
+    cpp_opt_defaults_desc:
+      "Inicializa los miembros con el DEFAULT literal de la columna (números, texto, booleanos, valores enum).",
+    cpp_opt_comparisons: "== y !=",
+    cpp_opt_comparisons_desc: "Operadores de comparación miembro a miembro.",
+    cpp_opt_headerGuard: "Protección de cabecera",
+    cpp_opt_headerGuard_desc:
+      "#pragma once o una protección clásica con #ifndef.",
+    cpp_opt_headerGuard_pragma_once: "#pragma once",
+    cpp_opt_headerGuard_ifndef: "#ifndef / #define",
+    sql_issue_migration_no_changes:
+      "Las dos versiones definen el mismo esquema.",
+    sql_issue_migration_drop_table: "{{table}} se elimina con todas sus filas.",
+    sql_issue_migration_drop_column:
+      "{{table}}.{{column}} se elimina con los datos que contiene.",
+    sql_issue_migration_not_null_no_default:
+      "{{table}}.{{column}} se añade como NOT NULL sin valor por defecto: falla si la tabla tiene filas. Dale un valor por defecto, o añádela admitiendo NULL, rellénala y después hazla NOT NULL.",
+    sql_issue_migration_set_not_null:
+      "{{table}}.{{column}} pasa a NOT NULL: falla si alguna fila tiene NULL en ella.",
+    sql_issue_migration_type_change:
+      "{{table}}.{{column}} cambia de {{from}} a {{to}}: los valores que no se puedan convertir hacen que falle.",
+    sql_issue_migration_oracle_type_change:
+      "{{table}}.{{column}}: Oracle solo reduce o cambia el tipo de una columna vacía.",
+    sql_issue_migration_identity_manual:
+      "{{table}}.{{column}}: {{dialect}} no puede añadir ni quitar una identidad en una columna existente; hay que recrear la tabla a mano.",
+    sql_issue_migration_enum_values_removed:
+      "{{name}} pierde {{values}}: las filas que los usan hacen que la migración falle.",
+    sql_issue_migration_sqlite_rebuild:
+      "SQLite no puede cambiar {{table}} directamente: se reconstruye (tabla nueva, se copian las filas y se elimina la antigua).",
+    sql_issue_migration_sqlite_rebuild_skipped:
+      "Reconstruir {{table}} elimina columnas, así que se escribe como comentarios mientras el borrado esté desactivado.",
+    sql_issue_migration_inherits_manual:
+      "Las tablas de las que hereda {{table}} han cambiado; cambia INHERITS a mano.",
+    cpp_issue_name_changed:
+      '"{{name}}" no es un nombre C++ válido o libre; se exportó como {{newName}}.',
+    cpp_issue_namespace_invalid:
+      'El namespace "{{name}}" no es un nombre C++ válido; se usó {{newName}}.',
+    cpp_issue_type_as_text:
+      "{{table}}.{{column}} ({{type}}) no tiene equivalente en C++ y es un std::string.",
+    cpp_issue_decimal_as_double:
+      "{{table}}.{{column}} ({{type}}) es un double: los valores con más de 15 cifras significativas pierden precisión. Usa std::string para decimales en los ajustes avanzados para mantenerlos exactos.",
+    cpp_issue_integer_may_overflow:
+      "{{table}}.{{column}} ({{type}}) puede guardar más de 64 bits; es un std::int64_t.",
+    cpp_issue_set_as_text:
+      "{{table}}.{{column}} es un SET: sus valores se guardan en un único std::string separado por comas.",
+    cpp_issue_soci_skipped:
+      "{{table}}.{{column}} ({{type}}) no puede pasar por soci::values y queda fuera de su conversión SOCI.",
+    cpp_issue_soci_time_precision:
+      "SOCI transporta fechas y horas como std::tm: se pierden las fracciones de segundo.",
+    cpp_issue_sqlpp_as_text:
+      "{{table}}.{{column}} ({{type}}) no tiene tipo sqlpp11 y se declara como texto.",
+    cpp_issue_tm_not_comparable:
+      "std::tm no tiene ==, así que no se generaron operadores de comparación para {{table}}.",
+    cpp_issue_enum_value_renamed:
+      'El valor "{{value}}" de {{name}} es el enumerador {{newName}}.',
+    audit_auth_setup: "creó la cuenta de administrador",
+    audit_auth_signup: "se registró",
+    audit_auth_login: "inició sesión",
+    audit_auth_login_failed: "no pudo iniciar sesión como",
+    audit_auth_login_disabled: "intentó entrar en una cuenta desactivada",
+    audit_auth_logout: "cerró sesión",
+    audit_auth_password_changed: "cambió su contraseña",
+    audit_user_created: "creó la cuenta",
+    audit_user_password_reset: "restableció la contraseña de",
+    audit_user_disabled: "desactivó la cuenta",
+    audit_user_enabled: "activó la cuenta",
+    audit_user_deleted: "eliminó la cuenta",
+    audit_diagram_created: "creó el diagrama",
+    audit_diagram_edited: "editó el diagrama",
+    audit_diagram_renamed: "renombró el diagrama a",
+    audit_diagram_deleted: "eliminó el diagrama",
+    audit_diagram_restored: "restauró una versión del diagrama",
+    audit_diagram_version_named: "nombró una versión",
+    audit_diagram_member_set: "compartió el diagrama con",
+    audit_diagram_member_removed: "dejó de compartir el diagrama con",
+    audit_diagram_link_access: "cambió quién puede abrir el diagrama",
+    audit_diagram_owner_changed: "pasó el diagrama a",
+    audit_git_configured: "conectó el diagrama a un repositorio",
+    audit_git_disconnected: "desconectó el repositorio",
+    audit_git_pushed: "subió al repositorio",
+    audit_git_pulled: "trajo del repositorio",
+    audit_types_changed: "cambió los tipos personalizados",
+    audit_backup_created: "hizo una copia de seguridad",
+    audit_backup_downloaded: "descargó la copia de seguridad",
   },
 };
 
