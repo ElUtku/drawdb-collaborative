@@ -113,6 +113,11 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
   const isTemplate = useMatch("/editor/templates/:id");
 
   const navigate = useNavigateWithParams();
+  // Used from the collaboration callbacks, which must not depend on it.
+  const navigateRef = useRef(navigate);
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
   const handleResize = (e) => {
     if (!resize) return;
     const w = isRtl(i18n.language) ? window.innerWidth - e.clientX : e.clientX;
@@ -251,8 +256,12 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
             if (next === previous) return;
             applyRole(next);
             // i18next directly: the language must not be a dependency of load.
-            if (next === "none") Toast.warning(i18next.t("access_revoked"));
-            else if (!canEdit(next)) Toast.info(i18next.t("access_now_viewer"));
+            if (next === "none") {
+              // Nothing of it stays on screen once access is gone.
+              Toast.warning(i18next.t("access_revoked"));
+              navigateRef.current("/editor", { replace: true });
+            } else if (!canEdit(next))
+              Toast.info(i18next.t("access_now_viewer"));
             else if (!canEdit(previous)) {
               Toast.success(i18next.t("access_now_editor"));
             }

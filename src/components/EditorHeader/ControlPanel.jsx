@@ -1911,6 +1911,7 @@ export default function ControlPanel({
               className="flex items-center py-1 px-2 hover-2 rounded-sm disabled:opacity-50"
               onClick={() => addTable()}
               disabled={layout.readOnly}
+              aria-label={t("add_table")}
             >
               <IconAddTable />
             </button>
@@ -1920,6 +1921,7 @@ export default function ControlPanel({
               className="py-1 px-2 hover-2 rounded-sm flex items-center disabled:opacity-50"
               onClick={() => addArea()}
               disabled={layout.readOnly}
+              aria-label={t("add_area")}
             >
               <IconAddArea />
             </button>
@@ -1929,6 +1931,7 @@ export default function ControlPanel({
               className="py-1 px-2 hover-2 rounded-sm flex items-center disabled:opacity-50"
               onClick={() => addNote()}
               disabled={layout.readOnly}
+              aria-label={t("add_note")}
             >
               <IconAddNote />
             </button>

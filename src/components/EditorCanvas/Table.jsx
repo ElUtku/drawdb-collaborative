@@ -627,13 +627,14 @@ export default function Table({
             </span>
           </div>
           <div className="text-zinc-400">
-            {hoveredField === index ? (
+            {hoveredField === index && !layout.readOnly ? (
               <Button
                 theme="solid"
                 size="small"
                 style={{
                   backgroundColor: "#d42020b3",
                 }}
+                aria-label={t("delete")}
                 icon={<IconMinus />}
                 disabled={layout.readOnly || lockedByParticipant}
                 onClick={() => {

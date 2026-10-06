@@ -250,7 +250,12 @@ export function createDiagramStore(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(diagram_id, version) DO UPDATE SET
        title = COALESCE(excluded.title, diagram_versions.title),
-       label = COALESCE(diagram_versions.label, excluded.label)`,
+       label = COALESCE(diagram_versions.label, excluded.label),
+       -- A version given a name is shown as saved by whoever named it.
+       user_id = CASE WHEN excluded.title IS NOT NULL
+         THEN excluded.user_id ELSE diagram_versions.user_id END,
+       username = CASE WHEN excluded.title IS NOT NULL
+         THEN excluded.username ELSE diagram_versions.username END`,
   );
   // The limit applies to versions saved while editing; the first version and
   // the ones people named are kept.

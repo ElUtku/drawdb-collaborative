@@ -326,6 +326,13 @@ exportación C++ con `g++`, y con sqlpp11 y SOCI si se indican sus rutas en `CPP
 `CPP_DATE` y `CPP_SOCI` (ver `scripts/check-cpp.mjs`). Los tests de Protobuf usan `protoc` si
 está instalado.
 
+`npm run test:e2e` recorre la aplicación en un navegador real (Playwright, que se instala
+aparte con `npm install --no-save playwright`): crear, desactivar y eliminar cuentas; crear un
+diagrama; compartirlo como lector y como editor y ver los cambios de permisos en directo;
+historial, restauración y migración; exportaciones SQL, C++ y Protobuf; tipos personalizados;
+registro de actividad y copias de seguridad. Arranca su propio servidor con una base de datos
+temporal y comprueba también que ninguna petición sale del servidor.
+
 ## Licencias
 
 Este programa es software libre bajo la [GNU AGPL-3.0](LICENSE), heredada de

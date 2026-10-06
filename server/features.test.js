@@ -1138,3 +1138,37 @@ test("the source page offers the source archive and the SBOM", async (t) => {
   assert.match(sbom.response.headers.get("content-type"), /cyclonedx/);
   assert.equal(sbom.data.bomFormat, "CycloneDX");
 });
+
+test("a named version is credited to whoever named it", async (t) => {
+  const { api, createUser, createDiagram } = await startInstance(t, {
+    env: { HISTORY_INTERVAL_MINUTES: "0" },
+  });
+  const owner = await createUser("owner");
+  const editor = await createUser("editor");
+  const diagram = await createDiagram(owner);
+  await api("PUT", `/api/diagrams/${diagram.id}/members/${editor.id}`, {
+    cookie: owner.cookie,
+    body: { role: "editor" },
+  });
+  // The editor's save is recorded as a version of theirs...
+  const saved = await api("PUT", `/api/diagrams/${diagram.id}`, {
+    cookie: editor.cookie,
+    body: { document: doc([table(1, "t1")]), baseVersion: 1 },
+  });
+  assert.equal(saved.status, 200);
+  // ...and the owner names that same state.
+  const named = await api("POST", `/api/diagrams/${diagram.id}/versions`, {
+    cookie: owner.cookie,
+    body: { title: "1.0" },
+  });
+  assert.equal(named.status, 201);
+  const { versions } = (
+    await api("GET", `/api/diagrams/${diagram.id}/versions`, {
+      cookie: owner.cookie,
+    })
+  ).data;
+  const version = versions.find((v) => v.title === "1.0");
+  assert.equal(version.version, 2);
+  assert.equal(version.username, "owner");
+  assert.deepEqual(version.editors, ["editor"]);
+});

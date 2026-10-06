@@ -17,6 +17,7 @@
     "sbom": "npm sbom --sbom-format cyclonedx --omit dev --sbom-type application",
     "check:licenses": "node scripts/check-licenses.mjs",
     "test:cpp": "node --import ./scripts/test-loader.mjs scripts/check-cpp.mjs",
+    "test:e2e": "node scripts/e2e.mjs",
     "preview": "vite preview",
     "test:export": "node --import ./scripts/test-loader.mjs --test src/utils/exportSQL/exportSQL.test.js src/utils/exportSQL/migration.test.js src/utils/exportAs/protobuf.test.js src/utils/exportAs/cpp.test.js",
     "test:engines": "node --import ./scripts/test-loader.mjs scripts/sql-engines/run.js",
