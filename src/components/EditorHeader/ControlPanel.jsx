@@ -77,6 +77,10 @@ import { useTranslation } from "react-i18next";
 import { exportSQL } from "../../utils/exportSQL";
 import { databases } from "../../data/databases";
 import { jsonToMermaid } from "../../utils/exportAs/mermaid";
+import {
+  defaultProtobufOptions,
+  jsonToProtobuf,
+} from "../../utils/exportAs/protobuf";
 import { isRtl } from "../../i18n/utils/rtl";
 import { jsonToDocumentation } from "../../utils/exportAs/documentation";
 import { IdContext } from "../Workspace";
@@ -1351,6 +1355,31 @@ export default function ControlPanel({
                 data: result,
                 extension: "md",
               }));
+            },
+          },
+          {
+            name: "Protobuf",
+            function: () => {
+              openExportModal(MODAL.CODE);
+              const source = {
+                tables: tables,
+                relationships: relationships,
+                database: database,
+                title: title,
+                ...(databases[database].hasTypes && { types: types }),
+                ...(databases[database].hasEnums && { enums: enums }),
+              };
+              setExportData((prev) => {
+                const protoOptions =
+                  prev.protoOptions ?? defaultProtobufOptions;
+                return {
+                  ...prev,
+                  data: jsonToProtobuf(source, protoOptions),
+                  extension: "proto",
+                  protoSource: source,
+                  protoOptions,
+                };
+              });
             },
           },
           {

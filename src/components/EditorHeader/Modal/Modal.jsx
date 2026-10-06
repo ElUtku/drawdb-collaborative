@@ -31,6 +31,8 @@ import New from "./New";
 import Open from "./Open";
 import Rename from "./Rename";
 import SetTableWidth from "./SetTableWidth";
+import ProtobufOptions from "./ProtobufOptions";
+import { jsonToProtobuf } from "../../../utils/exportAs/protobuf";
 import { mergeCustomTypes } from "../../../utils/customTypes";
 
 const extensionToLanguage = {
@@ -38,6 +40,7 @@ const extensionToLanguage = {
   sql: "sql",
   dbml: "dbml",
   json: "json",
+  proto: "proto",
 };
 
 export default function Modal({
@@ -297,6 +300,25 @@ export default function Modal({
                   showCopyButton={true}
                 />
               )}
+              {modal === MODAL.CODE &&
+                exportData.extension === "proto" &&
+                exportData.protoSource && (
+                  <ProtobufOptions
+                    options={exportData.protoOptions}
+                    defaultPackage={
+                      jsonToProtobuf(exportData.protoSource, {
+                        packageName: "",
+                      }).match(/^package (.+);$/m)?.[1] ?? ""
+                    }
+                    onChange={(protoOptions) =>
+                      setExportData((prev) => ({
+                        ...prev,
+                        protoOptions,
+                        data: jsonToProtobuf(prev.protoSource, protoOptions),
+                      }))
+                    }
+                  />
+                )}
               <div className="text-sm font-semibold mt-2">{t("filename")}:</div>
               <Input
                 value={exportData.filename}
