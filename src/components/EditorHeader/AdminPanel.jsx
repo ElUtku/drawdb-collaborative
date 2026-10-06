@@ -10,6 +10,20 @@ export default function AdminPanel({ visible, onClose }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [resetting, setResetting] = useState(null);
+  const [resetValue, setResetValue] = useState("");
+
+  const resetPassword = async (user) => {
+    setError("");
+    try {
+      await adminApi.resetPassword(user.id, resetValue);
+      Toast.success(t("password_reset_done", { username: user.username }));
+      setResetting(null);
+      setResetValue("");
+    } catch (resetError) {
+      setError(resetError.message);
+    }
+  };
 
   useEffect(() => {
     if (!visible) return;
@@ -119,13 +133,54 @@ export default function AdminPanel({ visible, onClose }) {
           {users.map((user) => (
             <div
               key={user.id}
-              className="flex items-center justify-between px-3 py-2 border-b border-color last:border-b-0"
+              className="px-3 py-2 border-b border-color last:border-b-0"
             >
-              <span className="truncate">{user.username}</span>
-              {user.isAdmin && (
-                <Tag color="light-blue" size="small">
-                  {t("admin_label")}
-                </Tag>
+              <div className="flex items-center justify-between">
+                <span className="truncate">{user.username}</span>
+                <span className="flex items-center gap-2 shrink-0">
+                  {user.isAdmin && (
+                    <Tag color="light-blue" size="small">
+                      {t("admin_label")}
+                    </Tag>
+                  )}
+                  <span className="text-xs text-zinc-500">
+                    {user.createdAt
+                      ? new Date(user.createdAt).toLocaleDateString()
+                      : ""}
+                  </span>
+                  {!user.isAdmin && (
+                    <Button
+                      size="small"
+                      type="tertiary"
+                      onClick={() => {
+                        setResetting(resetting === user.id ? null : user.id);
+                        setResetValue("");
+                      }}
+                    >
+                      {t("reset_password")}
+                    </Button>
+                  )}
+                </span>
+              </div>
+              {resetting === user.id && (
+                <div className="flex gap-2 mt-2">
+                  <Input
+                    mode="password"
+                    size="small"
+                    placeholder={t("new_password")}
+                    value={resetValue}
+                    onChange={setResetValue}
+                    autoComplete="new-password"
+                  />
+                  <Button
+                    size="small"
+                    theme="solid"
+                    disabled={resetValue.length < 8}
+                    onClick={() => resetPassword(user)}
+                  >
+                    {t("save")}
+                  </Button>
+                </div>
               )}
             </div>
           ))}

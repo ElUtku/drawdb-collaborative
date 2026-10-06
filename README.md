@@ -12,7 +12,8 @@ Fork de [drawDB](https://github.com/drawdb-io/drawdb) basado en
 preparado para autoalojarse, incluso en servidores sin Internet.
 
 - Varios usuarios editando el mismo diagrama a la vez, con cursores y nombres.
-- Cuentas de usuario gestionadas por un administrador. No hay registro libre.
+- Cuentas de usuario: las crea el administrador o, si se activa, cada usuario se registra solo.
+  Cada usuario puede cambiar su contraseña.
 - Diagramas guardados en el servidor (SQLite).
 - Importación y exportación de SQL (MySQL, PostgreSQL, SQLite, MariaDB, SQL Server, Oracle).
 - Sincronización opcional de cada diagrama con un repositorio Git.
@@ -40,6 +41,7 @@ Si necesitas cambiar algo, copia `.env.example` a `.env` y edítalo antes de arr
 
 | Variable | Por defecto | Cuándo cambiarla |
 |---|---|---|
+| `OPEN_REGISTRATION` | `false` | Ponla a `true` para que cualquiera con acceso a la URL pueda crearse una cuenta de usuario normal. Actívala solo si la URL no es accesible para desconocidos. |
 | `TRUST_PROXY` | `false` | **Es obligatorio ponerla a `1` si hay un proxy inverso delante.** Si no, todos los usuarios comparten el límite de intentos de login y la cookie no se marca como `Secure`. |
 | `GIT_SECRET_KEY` | *(vacía)* | Recomendada si usas la sincronización con Git. Cifra los tokens de acceso; sin ella, la clave de cifrado se guarda en la propia base de datos. Genera una con `openssl rand -hex 32`. |
 | `ALLOWED_ORIGINS` | *(vacía)* | Solo si el WebSocket rechaza conexiones porque el proxy cambia la cabecera `Host`. Ejemplo: `https://drawdb.example.local` |
@@ -101,12 +103,22 @@ y servidor x86), añade `--platform linux/amd64` a `podman build`.
 
 ## Usuarios y permisos
 
-- La primera cuenta registrada es la de administrador. Después, el registro queda cerrado y
-  el administrador crea las cuentas desde el icono de personas de la barra del editor.
+- La primera cuenta registrada es la de administrador. Solo puede haber uno.
+- Después, el administrador crea las cuentas desde el icono de personas de la barra del editor.
+  Con `OPEN_REGISTRATION=true`, además, cada persona puede crearse su cuenta desde la pantalla
+  de inicio de sesión (máximo 5 registros por hora y por IP). En ambos casos son usuarios normales.
+- El panel de administración muestra **todas** las cuentas, incluidas las autorregistradas, con
+  su fecha de creación.
+- Cada usuario puede cambiar su contraseña desde su avatar → **Change password**. Al hacerlo se
+  cierran sus demás sesiones abiertas.
+- Las contraseñas **nunca se guardan**: solo se almacena un hash `scrypt` con sal única por
+  usuario. Las sesiones también se guardan como hash. Ni el administrador puede ver contraseñas.
 - Quien crea un diagrama es su dueño: lo ve en su lista y es el único que puede borrarlo o
   configurar su sincronización con Git.
 - **Cualquier usuario con el enlace de un diagrama puede abrirlo y editarlo.** Comparte los
   enlaces solo con quien deba tener acceso.
+- No hay recuperación de contraseña por correo. Si un usuario olvida la suya, el administrador
+  le pone una nueva desde el panel (**Reset password**) y el usuario la cambia después.
 - Si se pierde la cuenta de administrador, se recupera por SQL:
   `UPDATE users SET is_admin = 1 WHERE username = '<usuario>';`
 
@@ -149,6 +161,8 @@ npm run build
 - Iconos y editor Monaco empaquetados en lugar de cargarse desde jsDelivr y cdnjs.
 - `trust proxy` configurable (`TRUST_PROXY`) para evitar que se falsee la IP en el login.
 - Cabeceras de seguridad y comprobación de `Origin` en el WebSocket.
+- Registro abierto opcional (`OPEN_REGISTRATION`) con límite por IP, y cambio de contraseña
+  por el propio usuario.
 - Dependencias actualizadas (`npm audit fix`).
 - Página no indexable por buscadores.
 

@@ -10,6 +10,7 @@ services:
       PORT: 3000
       DATABASE_PATH: /data/drawdb.sqlite
       # Opcionales: se leen del archivo .env si existe (ver .env.example).
+      OPEN_REGISTRATION: ${OPEN_REGISTRATION:-false}
       GIT_SECRET_KEY: ${GIT_SECRET_KEY:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}

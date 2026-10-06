@@ -116,6 +116,15 @@ export function createApplication({ databasePath, staticPath } = {}) {
     rootDir: defaultGitRoot(databasePath),
   });
   const loginThrottle = createLoginThrottle();
+  // Caps self-service sign-ups per client IP (5 per hour) when registration is open.
+  const registerThrottle = createLoginThrottle({
+    maxAttempts: 5,
+    windowMs: 60 * 60 * 1000,
+  });
+  const passwordThrottle = createLoginThrottle();
+  const openRegistration = /^(1|true|yes)$/i.test(
+    process.env.OPEN_REGISTRATION || "",
+  );
   const app = express();
   app.disable("x-powered-by");
   // Only trust X-Forwarded-* when a reverse proxy really sits in front.
@@ -192,15 +201,20 @@ export function createApplication({ databasePath, staticPath } = {}) {
   const CREDENTIALS_ERROR =
     "A username of 3-32 letters, digits, dot, dash or underscore and a password of at least 8 characters are required";
 
-  // Self-service registration exists only to claim the empty instance. The
-  // first account becomes the administrator; everyone else is created by them.
+  // The first account always claims the empty instance and becomes the
+  // administrator. After that, sign-up stays closed unless OPEN_REGISTRATION
+  // is enabled, in which case anyone can create a regular (non-admin) account.
   app.get("/api/auth/status", (_req, res) =>
-    res.json({ setupRequired: auth.countUsers() === 0 }),
+    res.json({
+      setupRequired: auth.countUsers() === 0,
+      registrationOpen: openRegistration,
+    }),
   );
 
   app.post("/api/auth/register", async (req, res, next) => {
     try {
-      if (auth.countUsers() > 0) {
+      const bootstrap = auth.countUsers() === 0;
+      if (!bootstrap && !openRegistration) {
         res.status(403).json({
           error: "Registration is closed. Ask an administrator for an account.",
         });
@@ -210,15 +224,24 @@ export function createApplication({ databasePath, staticPath } = {}) {
         res.status(400).json({ error: CREDENTIALS_ERROR });
         return;
       }
+      const throttleKey = `register:${req.ip}`;
+      const throttle = registerThrottle.check(throttleKey);
+      if (!throttle.allowed) {
+        res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
+        res.status(429).json({ error: "Too many attempts. Try again later." });
+        return;
+      }
+      registerThrottle.fail(throttleKey);
       const result = await auth.createUser({
         username: req.body.username,
         password: req.body.password,
-        isAdmin: true,
-        requireEmpty: true,
+        isAdmin: bootstrap,
+        requireEmpty: bootstrap,
       });
       if (result.status === "already_initialized") {
-        res.status(403).json({
-          error: "Registration is closed. Ask an administrator for an account.",
+        res.status(409).json({
+          error:
+            "The administrator account was just created. Sign in or try again.",
         });
         return;
       }
@@ -264,6 +287,34 @@ export function createApplication({ databasePath, staticPath } = {}) {
     },
   );
 
+  app.put(
+    "/api/admin/users/:userId/password",
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+      try {
+        const password = isPlainObject(req.body) ? req.body.password : null;
+        if (!isValidPassword(password)) {
+          res
+            .status(400)
+            .json({ error: "A password of at least 8 characters is required" });
+          return;
+        }
+        const result = await auth.resetPassword({
+          userId: String(req.params.userId),
+          newPassword: password,
+        });
+        if (result.status !== "changed") {
+          res.status(404).json({ error: "Account not found" });
+          return;
+        }
+        res.status(204).end();
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   app.post("/api/auth/login", async (req, res, next) => {
     try {
       if (!isPlainObject(req.body)) {
@@ -302,6 +353,48 @@ export function createApplication({ databasePath, staticPath } = {}) {
   app.get("/api/auth/me", requireAuth, (req, res) =>
     res.json({ user: req.user }),
   );
+
+  app.post("/api/auth/password", requireAuth, async (req, res, next) => {
+    try {
+      const body = isPlainObject(req.body) ? req.body : {};
+      if (
+        typeof body.currentPassword !== "string" ||
+        !isValidPassword(body.newPassword)
+      ) {
+        res.status(400).json({
+          error:
+            "The current password and a new password of at least 8 characters are required",
+        });
+        return;
+      }
+      const throttleKey = `password:${req.user.id}`;
+      const throttle = passwordThrottle.check(throttleKey);
+      if (!throttle.allowed) {
+        res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
+        res.status(429).json({ error: "Too many attempts. Try again later." });
+        return;
+      }
+      const result = await auth.changePassword({
+        userId: req.user.id,
+        currentPassword: body.currentPassword,
+        newPassword: body.newPassword,
+        keepToken: parseCookies(req.headers.cookie)[SESSION_COOKIE],
+      });
+      if (result.status === "invalid_password") {
+        passwordThrottle.fail(throttleKey);
+        res.status(403).json({ error: "The current password is incorrect" });
+        return;
+      }
+      if (result.status !== "changed") {
+        res.status(404).json({ error: "Account not found" });
+        return;
+      }
+      passwordThrottle.succeed(throttleKey);
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.get("/api/diagrams", requireAuth, (req, res) =>
     res.json({ diagrams: store.list(req.user.id) }),

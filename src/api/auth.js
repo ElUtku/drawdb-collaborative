@@ -31,12 +31,26 @@ export const authApi = {
   logout() {
     return request("/api/auth/logout", { method: "POST" });
   },
+  changePassword({ currentPassword, newPassword }) {
+    return request("/api/auth/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  },
 };
 
 export const adminApi = {
   async listUsers() {
     const result = await request("/api/admin/users");
     return result.users;
+  },
+  resetPassword(userId, password) {
+    return request(`/api/admin/users/${encodeURIComponent(userId)}/password`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
   },
   async createUser({ username, password }) {
     const result = await request("/api/admin/users", {

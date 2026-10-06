@@ -150,6 +150,45 @@ export function createAuthStore(db) {
       return publicUser(selectUserById.get(id));
     },
 
+    // Administrator reset: stores a new hash and signs the user out everywhere.
+    async resetPassword({ userId, newPassword }) {
+      if (!selectUserById.get(userId)) return { status: "not_found" };
+      const passwordHash = await hashPassword(newPassword);
+      db.transaction(() => {
+        db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(
+          passwordHash,
+          userId,
+        );
+        db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+      })();
+      return { status: "changed" };
+    },
+
+    // Re-checks the current password, stores a new scrypt hash and signs out
+    // every other session of the account. Plain passwords are never stored.
+    async changePassword({ userId, currentPassword, newPassword, keepToken }) {
+      const user = publicUser(selectUserById.get(userId));
+      if (!user) return { status: "not_found" };
+      const verified = await this.verifyCredentials({
+        username: user.username,
+        password: currentPassword,
+      });
+      if (!verified) return { status: "invalid_password" };
+      const passwordHash = await hashPassword(newPassword);
+      const keepHash =
+        typeof keepToken === "string" && keepToken ? hashToken(keepToken) : "";
+      db.transaction(() => {
+        db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(
+          passwordHash,
+          userId,
+        );
+        db.prepare(
+          "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+        ).run(userId, keepHash);
+      })();
+      return { status: "changed" };
+    },
+
     createSession(userId) {
       const token = crypto.randomBytes(32).toString("base64url");
       const now = Date.now();

@@ -14,15 +14,19 @@ export default function Login({ mode = "login" }) {
   const location = useLocation();
   const { status, isAuthenticated, login, register } = useAuth();
 
-  // Registration is open only while the instance has no accounts at all: the
-  // first person to sign up claims it and becomes the administrator.
+  // The first person to sign up claims the instance and becomes the
+  // administrator. After that, sign-up is available only when the server runs
+  // with OPEN_REGISTRATION enabled.
   const [setupRequired, setSetupRequired] = useState(null);
+  const [registrationOpen, setRegistrationOpen] = useState(false);
   useEffect(() => {
     let active = true;
     authApi
       .status()
-      .then(({ setupRequired: required }) => {
-        if (active) setSetupRequired(required);
+      .then(({ setupRequired: required, registrationOpen: open }) => {
+        if (!active) return;
+        setSetupRequired(required);
+        setRegistrationOpen(Boolean(open));
       })
       .catch(() => {
         if (active) setSetupRequired(false);
@@ -49,9 +53,21 @@ export default function Login({ mode = "login" }) {
     );
   }
   if (isAuthenticated) return <Navigate to={redirectTo} replace />;
-  if (isRegister && !setupRequired) {
+  const canRegister = setupRequired || registrationOpen;
+  if (isRegister && !canRegister) {
     return <Navigate to="/login" replace state={location.state} />;
   }
+
+  const registerTitle = !isRegister
+    ? "sign_in"
+    : setupRequired
+      ? "create_admin_account"
+      : "create_account";
+  const registerSubtitle = !isRegister
+    ? "sign_in_subtitle"
+    : setupRequired
+      ? "create_admin_subtitle"
+      : "create_account_subtitle";
 
   const submit = async (event) => {
     event.preventDefault();
@@ -81,11 +97,9 @@ export default function Login({ mode = "login" }) {
       <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-zinc-800 p-8 shadow-xs">
         <div className="flex flex-col items-center mb-6">
           <img src={icon} width={48} alt="drawDB" />
-          <h1 className="text-xl font-semibold mt-3">
-            {t(isRegister ? "create_admin_account" : "sign_in")}
-          </h1>
+          <h1 className="text-xl font-semibold mt-3">{t(registerTitle)}</h1>
           <p className="text-sm text-zinc-500 mt-1 text-center">
-            {t(isRegister ? "create_admin_subtitle" : "sign_in_subtitle")}
+            {t(registerSubtitle)}
           </p>
         </div>
 
@@ -161,7 +175,7 @@ export default function Login({ mode = "login" }) {
             loading={submitting}
             disabled={!username.trim() || !password}
           >
-            {t(isRegister ? "create_admin_account" : "sign_in")}
+            {t(registerTitle)}
           </Button>
         </form>
 
@@ -179,14 +193,17 @@ export default function Login({ mode = "login" }) {
             </>
           )}
           {!isRegister &&
-            (setupRequired ? (
-              <Link
-                to="/register"
-                state={location.state}
-                className="text-sky-700 hover:underline"
-              >
-                {t("set_up_instance")}
-              </Link>
+            (canRegister ? (
+              <>
+                {!setupRequired && <>{t("no_account")} </>}
+                <Link
+                  to="/register"
+                  state={location.state}
+                  className="text-sky-700 hover:underline"
+                >
+                  {t(setupRequired ? "set_up_instance" : "create_account")}
+                </Link>
+              </>
             ) : (
               t("registration_closed")
             ))}

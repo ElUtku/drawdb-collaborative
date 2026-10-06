@@ -1,12 +1,15 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Avatar, Dropdown } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../hooks";
+import ChangePasswordModal from "./ChangePasswordModal";
 
 export default function UserMenu() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const [changingPassword, setChangingPassword] = useState(false);
 
   if (!user) return null;
 
@@ -16,22 +19,35 @@ export default function UserMenu() {
   };
 
   return (
-    <Dropdown
-      position="bottomRight"
-      render={
-        <Dropdown.Menu>
-          <Dropdown.Title>
-            {t("signed_in_as")} {user.username}
-          </Dropdown.Title>
-          <Dropdown.Item type="danger" onClick={signOut}>
-            {t("sign_out")}
-          </Dropdown.Item>
-        </Dropdown.Menu>
-      }
-    >
-      <Avatar size="extra-small" color="light-blue" className="cursor-pointer">
-        {user.username.slice(0, 2).toUpperCase()}
-      </Avatar>
-    </Dropdown>
+    <>
+      <Dropdown
+        position="bottomRight"
+        render={
+          <Dropdown.Menu>
+            <Dropdown.Title>
+              {t("signed_in_as")} {user.username}
+            </Dropdown.Title>
+            <Dropdown.Item onClick={() => setChangingPassword(true)}>
+              {t("change_password")}
+            </Dropdown.Item>
+            <Dropdown.Item type="danger" onClick={signOut}>
+              {t("sign_out")}
+            </Dropdown.Item>
+          </Dropdown.Menu>
+        }
+      >
+        <Avatar
+          size="extra-small"
+          color="light-blue"
+          className="cursor-pointer"
+        >
+          {user.username.slice(0, 2).toUpperCase()}
+        </Avatar>
+      </Dropdown>
+      <ChangePasswordModal
+        visible={changingPassword}
+        onClose={() => setChangingPassword(false)}
+      />
+    </>
   );
 }

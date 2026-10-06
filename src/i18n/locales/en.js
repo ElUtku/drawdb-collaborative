@@ -346,7 +346,18 @@ const en = {
     add_user: "Add user",
     users: "Users",
     admin_users_subtitle:
-      "Only you can create accounts on this instance. New accounts are regular users.",
+      "Every account on this instance, including those people create themselves. New accounts are regular users.",
+    create_account: "Create an account",
+    create_account_subtitle:
+      "Choose a username and password to start using this instance.",
+    no_account: "No account yet?",
+    change_password: "Change password",
+    current_password: "Current password",
+    new_password: "New password",
+    reset_password: "Reset password",
+    password_reset_done:
+      "Password for {{username}} reset. They have been signed out.",
+    password_changed: "Password changed. Other sessions have been signed out.",
     user_created: "Created account {{username}}",
     admin_label: "Administrator",
     failed_to_load_users: "Failed to load users",

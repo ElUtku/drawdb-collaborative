@@ -1,3 +1,4 @@
+/* global process */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { WebSocket } from "ws";
@@ -490,12 +491,18 @@ test("registration closes after the first account claims the instance", async (t
   const base = `http://127.0.0.1:${port}`;
 
   const before = await fetch(`${base}/api/auth/status`);
-  assert.deepEqual(await before.json(), { setupRequired: true });
+  assert.deepEqual(await before.json(), {
+    setupRequired: true,
+    registrationOpen: false,
+  });
 
   const adminCookie = await registerAdmin(port, "root");
 
   const after = await fetch(`${base}/api/auth/status`);
-  assert.deepEqual(await after.json(), { setupRequired: false });
+  assert.deepEqual(await after.json(), {
+    setupRequired: false,
+    registrationOpen: false,
+  });
 
   const second = await fetch(`${base}/api/auth/register`, {
     method: "POST",
@@ -568,4 +575,144 @@ test("only the administrator can create accounts", async (t) => {
   });
   assert.equal(escalation.status, 201);
   assert.equal((await escalation.json()).user.isAdmin, false);
+});
+
+test("open registration creates regular accounts the admin can see", async (t) => {
+  process.env.OPEN_REGISTRATION = "true";
+  const application = createApplication({ databasePath: ":memory:" });
+  delete process.env.OPEN_REGISTRATION;
+  const port = await listen(application);
+  t.after(() => {
+    application.websocket.close();
+    application.server.close();
+    application.database.close();
+  });
+  const base = `http://127.0.0.1:${port}`;
+
+  const adminCookie = await registerAdmin(port, "root");
+  const status = await fetch(`${base}/api/auth/status`);
+  assert.deepEqual(await status.json(), {
+    setupRequired: false,
+    registrationOpen: true,
+  });
+
+  const signup = await fetch(`${base}/api/auth/register`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ username: "alice", password: PASSWORD }),
+  });
+  assert.equal(signup.status, 201);
+  assert.equal((await signup.json()).user.isAdmin, false);
+
+  const users = await fetch(`${base}/api/admin/users`, {
+    headers: { Cookie: adminCookie },
+  });
+  const listed = (await users.json()).users.map((user) => user.username);
+  assert.deepEqual(listed, ["root", "alice"]);
+
+  // Sign-ups are capped per IP.
+  let last;
+  for (let index = 0; index < 5; index += 1) {
+    last = await fetch(`${base}/api/auth/register`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ username: `bot${index}`, password: PASSWORD }),
+    });
+  }
+  assert.equal(last.status, 429);
+});
+
+test("users change their own password and other sessions end", async (t) => {
+  const application = createApplication({ databasePath: ":memory:" });
+  const port = await listen(application);
+  t.after(() => {
+    application.websocket.close();
+    application.server.close();
+    application.database.close();
+  });
+  const base = `http://127.0.0.1:${port}`;
+  const cookies = await createUsers(port, ["root", "alice"]);
+  const otherLogin = await fetch(`${base}/api/auth/login`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ username: "alice", password: PASSWORD }),
+  });
+  const otherCookie = sessionCookieFrom(otherLogin);
+  const change = (body, cookie = cookies.alice) =>
+    fetch(`${base}/api/auth/password`, {
+      method: "POST",
+      headers: { ...JSON_HEADERS, Cookie: cookie },
+      body: JSON.stringify(body),
+    });
+
+  assert.equal(
+    (
+      await change({
+        currentPassword: "wrong-password",
+        newPassword: "new-secret-123",
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await change({ currentPassword: PASSWORD, newPassword: "short" })).status,
+    400,
+  );
+  assert.equal(
+    (await change({ currentPassword: PASSWORD, newPassword: "new-secret-123" }))
+      .status,
+    204,
+  );
+
+  const stillIn = await fetch(`${base}/api/auth/me`, {
+    headers: { Cookie: cookies.alice },
+  });
+  assert.equal(stillIn.status, 200);
+  const signedOut = await fetch(`${base}/api/auth/me`, {
+    headers: { Cookie: otherCookie },
+  });
+  assert.equal(signedOut.status, 401);
+
+  const oldLogin = await fetch(`${base}/api/auth/login`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ username: "alice", password: PASSWORD }),
+  });
+  assert.equal(oldLogin.status, 401);
+  const newLogin = await fetch(`${base}/api/auth/login`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ username: "alice", password: "new-secret-123" }),
+  });
+  assert.equal(newLogin.status, 200);
+
+  // The administrator can reset it; the user is signed out everywhere.
+  const aliceId = (
+    await (
+      await fetch(`${base}/api/auth/me`, { headers: { Cookie: cookies.alice } })
+    ).json()
+  ).user.id;
+  const forbidden = await fetch(`${base}/api/admin/users/${aliceId}/password`, {
+    method: "PUT",
+    headers: { ...JSON_HEADERS, Cookie: cookies.alice },
+    body: JSON.stringify({ password: "admin-chosen-1" }),
+  });
+  assert.equal(forbidden.status, 403);
+  const reset = await fetch(`${base}/api/admin/users/${aliceId}/password`, {
+    method: "PUT",
+    headers: { ...JSON_HEADERS, Cookie: cookies.root },
+    body: JSON.stringify({ password: "admin-chosen-1" }),
+  });
+  assert.equal(reset.status, 204);
+  const afterReset = await fetch(`${base}/api/auth/me`, {
+    headers: { Cookie: cookies.alice },
+  });
+  assert.equal(afterReset.status, 401);
+
+  // Only a salted scrypt hash is stored, never the password itself.
+  const row = application.database
+    .prepare("SELECT password_hash FROM users WHERE username = 'alice'")
+    .get();
+  assert.match(row.password_hash, /^scrypt\$[0-9a-f]{32}\$[0-9a-f]{128}$/);
+  assert.ok(!row.password_hash.includes("admin-chosen-1"));
 });
