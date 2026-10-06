@@ -1686,9 +1686,6 @@ export default function ControlPanel({
       ask_on_discord: {
         function: () => window.open(socials.discord, "_blank"),
       },
-      report_bug: {
-        function: () => window.open("/bug-report", "_blank"),
-      },
     },
   };
 

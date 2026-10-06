@@ -99,6 +99,13 @@ function setAssetHeaders(res, filePath) {
   }
 }
 
+function parseTrustProxy(value) {
+  if (value === undefined || value === "" || value === "false") return false;
+  if (value === "true") return true;
+  const hops = Number(value);
+  return Number.isInteger(hops) && hops >= 0 ? hops : value;
+}
+
 export function createApplication({ databasePath, staticPath } = {}) {
   const database = openDatabase(databasePath);
   const store = createDiagramStore(database);
@@ -111,7 +118,20 @@ export function createApplication({ databasePath, staticPath } = {}) {
   const loginThrottle = createLoginThrottle();
   const app = express();
   app.disable("x-powered-by");
-  app.set("trust proxy", 1);
+  // Only trust X-Forwarded-* when a reverse proxy really sits in front.
+  // Trusting it on a directly exposed port lets clients spoof their IP and
+  // sidestep the login throttle. Set TRUST_PROXY=1 behind Caddy/nginx/Traefik.
+  app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=(), payment=()",
+    );
+    next();
+  });
   app.use(express.json({ limit: MAX_DOCUMENT_BYTES }));
 
   const validId = (req, res, next) => {

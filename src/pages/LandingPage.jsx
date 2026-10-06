@@ -14,7 +14,6 @@ import github from "../assets/github.png";
 import warp from "../assets/warp.png";
 import screenshot from "../assets/screenshot.png";
 import FadeIn from "../animations/FadeIn";
-import axios from "axios";
 import { languages } from "../i18n/i18n";
 import { Tweet } from "react-tweet";
 import { socials } from "../data/socials";
@@ -27,20 +26,12 @@ function shortenNumber(number) {
 }
 
 export default function LandingPage() {
-  const [stats, setStats] = useState({ stars: 18000, forks: 1200 });
+  const [stats] = useState({ stars: 18000, forks: 1200 });
 
   useEffect(() => {
-    const fetchStats = async () => {
-      await axios
-        .get("https://api.github-star-counter.workers.dev/user/drawdb-io")
-        .then((res) => setStats(res.data));
-    };
-
     document.body.setAttribute("theme-mode", "light");
     document.title =
       "drawDB | Online database diagram editor and SQL generator";
-
-    fetchStats();
   }, []);
 
   return (

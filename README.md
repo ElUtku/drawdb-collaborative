@@ -1,212 +1,172 @@
 <div align="center">
-  <sup>Special thanks to:</sup>
-  <br>
-  <a href="https://www.warp.dev/drawdb/" target="_blank">
-    <img alt="Warp sponsorship" width="280" src="https://github.com/user-attachments/assets/c7f141e7-9751-407d-bb0e-d6f2c487b34f">
-    <br>
-    <b>Next-gen AI-powered intelligent terminal for all platforms</b>
-  </a>
+  <img width="64" alt="drawDB" src="./src/assets/icon-dark.png">
+  <h1>drawDB Collaborative</h1>
+  <p>Editor de diagramas de bases de datos, autoalojado y colaborativo en tiempo real.</p>
+  <img width="700" alt="Captura de drawDB" src="drawdb.png">
 </div>
 
-<br/>
-<br/>
+## Qué es
 
-<div align="center">
-    <img width="64" alt="drawDB logo" src="./src/assets/icon-dark.png">
-    <h1>drawDB Collaborative</h1>
-</div>
+Fork de [drawDB](https://github.com/drawdb-io/drawdb) basado en
+[artempas/drawdb-collaborative-with-auth](https://github.com/artempas/drawdb-collaborative-with-auth),
+preparado para autoalojarse, incluso en servidores sin Internet.
 
-<h3 align="center">A self-hosted, real-time collaborative database schema editor.</h3>
+- Varios usuarios editando el mismo diagrama a la vez, con cursores y nombres.
+- Cuentas de usuario gestionadas por un administrador. No hay registro libre.
+- Diagramas guardados en el servidor (SQLite).
+- Importación y exportación de SQL (MySQL, PostgreSQL, SQLite, MariaDB, SQL Server, Oracle).
+- Sincronización opcional de cada diagrama con un repositorio Git.
+- **No hace peticiones a Internet:** sin telemetría ni CDNs; iconos y editor van empaquetados.
+  La única excepción es la sincronización con Git, si se configura.
 
-<div align="center" style="margin-bottom:12px;">
-    <a href="https://github.com/yms2772/drawdb-collaborative" style="display: flex; align-items: center;">
-        <img src="https://img.shields.io/badge/Source-GitHub-grey?logo=github" alt="Source code"/>
-    </a>
-    <a href="./LICENSE" style="display: flex; align-items: center;">
-        <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="AGPL-3.0 license"/>
-    </a>
-</div>
+## Despliegue rápido
 
-<h3 align="center"><img width="700" style="border-radius:5px;" alt="drawDB screenshot demo" src="drawdb.png"></h3>
-
-drawDB Collaborative is an unofficial fork of
-[drawDB](https://github.com/drawdb-io/drawdb). It adds centralized SQLite
-storage and real-time WebSocket collaboration while retaining drawDB's
-browser-based ERD editing and SQL import/export features.
-
-This fork is independently maintained and is not affiliated with or endorsed
-by the original drawDB maintainers.
-
-Key additions include:
-
-- Invite-only accounts with server-side sessions, managed by an administrator
-- Centralized diagram storage backed by SQLite
-- Real-time table movement and editing between participants
-- Participant presence and viewport-aware collaborative cursors
-- Optimistic version checks that prevent stale clients from overwriting changes
-- Git sync that commits a diagram and its DDL to a repository, and reads them
-  back
-- A single-container setup for the frontend, API, WebSocket server, and storage
-
-## Getting Started
-
-### Local Development
+Requisitos: Podman o Docker con Compose.
 
 ```bash
-git clone https://github.com/yms2772/drawdb-collaborative.git
+git clone https://github.com/ElUtku/drawdb-collaborative.git
 cd drawdb-collaborative
-npm install
-npm run dev
+podman compose up -d --build
 ```
 
-This starts both the Vite frontend on port `5173` and the API/WebSocket server
-on port `3000`. Use `npm run dev:client` or `npm run dev:server` when only one
-side is needed.
+Abre <http://127.0.0.1:3000> y **registra la primera cuenta enseguida**: será la de
+administrador. Mientras no exista, cualquiera con acceso a la URL podría reclamarla.
 
-### Build
+El archivo `.env` es **opcional**. Sin él, la aplicación arranca con valores seguros por defecto.
+
+## Configuración (opcional)
+
+Si necesitas cambiar algo, copia `.env.example` a `.env` y edítalo antes de arrancar:
+
+| Variable | Por defecto | Cuándo cambiarla |
+|---|---|---|
+| `TRUST_PROXY` | `false` | **Es obligatorio ponerla a `1` si hay un proxy inverso delante.** Si no, todos los usuarios comparten el límite de intentos de login y la cookie no se marca como `Secure`. |
+| `GIT_SECRET_KEY` | *(vacía)* | Recomendada si usas la sincronización con Git. Cifra los tokens de acceso; sin ella, la clave de cifrado se guarda en la propia base de datos. Genera una con `openssl rand -hex 32`. |
+| `ALLOWED_ORIGINS` | *(vacía)* | Solo si el WebSocket rechaza conexiones porque el proxy cambia la cabecera `Host`. Ejemplo: `https://drawdb.example.local` |
+
+Después de cambiar el `.env`, ejecuta `podman compose up -d` para aplicarlo.
+
+## Acceso desde otros equipos
+
+El contenedor solo escucha en `127.0.0.1:3000`. Para acceder desde otros equipos hay dos opciones.
+
+**Con proxy inverso y HTTPS (recomendado).** Pon `TRUST_PROXY=1` en `.env`. El proxy debe
+reenviar el WebSocket (`/ws/...`) y conservar la cabecera `Host`.
+
+Caddy:
+
+```
+drawdb.example.local {
+    tls internal
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+nginx:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+**Sin proxy (solo en una red de confianza).** En `compose.yml` cambia el puerto a
+`"3000:3000"` y deja `TRUST_PROXY=false`. Las contraseñas viajarán sin cifrar.
+
+## Servidor sin Internet
+
+La construcción de la imagen descarga paquetes, así que hay que hacerla en un equipo con
+conexión y llevarla al servidor:
 
 ```bash
-git clone https://github.com/yms2772/drawdb-collaborative.git
-cd drawdb-collaborative
+# En el equipo con Internet
+podman build -t drawdb-collaborative .
+podman save -o drawdb-collaborative.tar drawdb-collaborative
+
+# Copia drawdb-collaborative.tar y compose.yml al servidor (y .env si lo usas)
+
+# En el servidor
+podman load -i drawdb-collaborative.tar
+podman compose up -d
+```
+
+Si el equipo de compilación y el servidor tienen distinta arquitectura (por ejemplo, Mac ARM
+y servidor x86), añade `--platform linux/amd64` a `podman build`.
+
+## Usuarios y permisos
+
+- La primera cuenta registrada es la de administrador. Después, el registro queda cerrado y
+  el administrador crea las cuentas desde el icono de personas de la barra del editor.
+- Quien crea un diagrama es su dueño: lo ve en su lista y es el único que puede borrarlo o
+  configurar su sincronización con Git.
+- **Cualquier usuario con el enlace de un diagrama puede abrirlo y editarlo.** Comparte los
+  enlaces solo con quien deba tener acceso.
+- Si se pierde la cuenta de administrador, se recupera por SQL:
+  `UPDATE users SET is_admin = 1 WHERE username = '<usuario>';`
+
+## Sincronización con Git
+
+Desde **Archivo (File) → Sync with git**, cada diagrama puede vincularse a un repositorio
+(`https://`, `ssh://` o `git@host:ruta`). Al pulsar **Commit and push** se sube un único
+commit con dos archivos: `<nombre>.json` (el diagrama) y `<nombre>.sql` (el DDL).
+**Pull from repository** sustituye el diagrama por la versión del repositorio para todos
+los que lo tengan abierto.
+
+Las credenciales HTTPS se guardan cifradas y nunca se devuelven por la API. Para SSH, monta
+la clave en el contenedor.
+
+## Mantenimiento
+
+```bash
+podman logs -f drawdb-collaborative     # ver registros
+podman compose down                     # parar
+podman compose up -d --build            # actualizar tras un git pull
+podman volume inspect drawdb-collaborative_drawdb-data   # ubicación de los datos
+```
+
+**Copias de seguridad:** copia el contenido del volumen (`drawdb.sqlite` y la carpeta `git/`).
+Contiene todos los diagramas, los usuarios y los tokens cifrados.
+
+## Desarrollo local
+
+```bash
 npm install
+npm run dev          # servidor API + Vite con recarga en caliente
+npm run test:server  # tests
 npm run build
 ```
 
-### Docker Build
+## Cambios respecto al fork de artempas
 
-```bash
-docker compose up --build
-```
+- Eliminados Vercel Analytics, el contador de estrellas de GitHub y la página de reporte de
+  errores, que enviaba datos a un servidor externo.
+- Iconos y editor Monaco empaquetados en lugar de cargarse desde jsDelivr y cdnjs.
+- `trust proxy` configurable (`TRUST_PROXY`) para evitar que se falsee la IP en el login.
+- Cabeceras de seguridad y comprobación de `Origin` en el WebSocket.
+- Dependencias actualizadas (`npm audit fix`).
+- Página no indexable por buscadores.
 
-Open `http://localhost:3000`. The single application container serves the
-frontend, diagram API, WebSocket collaboration endpoint, and SQLite storage.
-The Compose configuration persists the database in the `drawdb-data` volume.
+## Descargo de responsabilidad
 
-### Collaborative self-hosting
+Este software se ofrece **"tal cual", sin garantía de ningún tipo**, expresa o implícita,
+incluidas las de comerciabilidad, idoneidad para un fin concreto, seguridad o ausencia de
+errores. El autor de este fork **no ofrece soporte ni mantenimiento**, no se compromete a
+corregir fallos ni vulnerabilidades y **no se hace responsable** de ningún daño, pérdida de
+datos, incidente de seguridad o cualquier otra consecuencia derivada de su uso o de la
+imposibilidad de usarlo.
 
-Diagrams are stored centrally in SQLite; IndexedDB is not used for diagram
-storage. `DATABASE_PATH` controls the database location and defaults to
-`./data/drawdb.sqlite` outside the container. Diagram URLs use
-`/diagrams/:diagramId`, and everyone opening the same URL joins the same live
-session automatically.
+Quien lo despliegue lo hace bajo su propia responsabilidad y debe revisar el código, la
+configuración y la seguridad antes de usarlo, y mantener sus propias copias de seguridad.
+Las secciones 15 y 16 de la [licencia AGPL-3.0](LICENSE) recogen estas mismas exclusiones.
 
-The application exposes:
+## Licencia
 
-- `GET /api/auth/status`, `POST /api/auth/register`, `POST /api/auth/login`,
-  `POST /api/auth/logout`, `GET /api/auth/me`
-- `GET|POST /api/admin/users` (administrator only)
-- `GET|POST /api/diagrams`
-- `GET|PUT|DELETE /api/diagrams/:diagramId`
-- `GET|PUT|DELETE /api/diagrams/:diagramId/git`
-- `POST /api/diagrams/:diagramId/git/push`, `.../git/pull`, `.../git/test`,
-  `GET .../git/history`
-- `/ws/diagrams/:diagramId` (WebSocket)
-
-### Accounts
-
-Every diagram endpoint and the WebSocket handshake require a signed-in user.
-
-There is no open registration. The first visit to a fresh instance offers
-`/register` once: that first account claims the instance and becomes its
-administrator. From then on `/register` returns `403` and accounts are created
-only by the administrator, through the people icon in the editor toolbar (or
-`POST /api/admin/users`). Accounts created that way are always regular users —
-the administrator role cannot be granted over the API, so an instance has
-exactly one administrator. Upgrading an instance that already had accounts
-promotes its earliest account to administrator.
-
-If the administrator account is lost, the recovery path is direct SQL against
-the database, for example
-`UPDATE users SET is_admin = 1 WHERE username = '<name>';`.
-
-Passwords are hashed with scrypt and sessions are stored in SQLite, referenced
-by an `HttpOnly`, `SameSite=Lax` session cookie that is marked `Secure` when the
-request arrives over HTTPS. Sessions last 30 days and slide forward as they are
-used, so make sure the reverse proxy forwards `X-Forwarded-Proto` (see below)
-for the `Secure` flag to be set correctly.
-
-Access follows an owner-plus-link model:
-
-- The creator owns a diagram, sees it in their diagram list, and is the only
-  one who can delete it.
-- Any signed-in user who has the diagram URL can open, edit, and collaborate on
-  it. Treat diagram URLs as shareable secrets.
-- Diagrams created before authentication was added have no owner. They stay
-  visible and deletable for every signed-in user so no data is stranded.
-
-Collaborator names shown in presence and on cursors come from the signed-in
-account, not from the browser, so clients cannot spoof each other.
-
-Snapshot saves are debounced and guarded by an optimistic version. Stale
-clients receive the current snapshot instead of silently overwriting it.
-Reconnects send the last known version and converge on the server snapshot.
-
-### Git sync
-
-A diagram can be connected to a git repository from **File → Sync with git**.
-Each sync writes two files, under an optional path inside the repository:
-
-- `<name>.json` — the diagram document, which is what a pull reads back. Pan and
-  zoom are stripped, so moving the canvas never produces a commit.
-- `<name>.sql` — the DDL for the diagram's database, generated by the same
-  exporter as **File → Export SQL**.
-
-Syncing is always a deliberate act: nothing is committed until someone presses
-**Commit and push**, and one press produces exactly one commit carrying both
-files. Editing the diagram never touches the repository on its own.
-
-The server does the git work itself. It keeps a working copy per diagram under
-`<DATABASE_PATH directory>/git` (`/data/git` in the container, overridable with
-`GIT_WORKDIR`), resets it to the tip of the configured branch before every
-operation, and pushes an ordinary fast-forward commit authored by the signed-in
-user. Nothing is committed when the schema has not changed, and a branch that
-does not exist yet is created by the first push.
-
-- **Commit and push** saves any pending edit, then commits the current schema.
-- **Pull from repository** replaces the diagram with the version in the
-  repository and pushes that snapshot to everyone who has it open, so treat it
-  as a restore rather than a merge.
-
-Repository URLs must be `https://`, `ssh://` or `git@host:path`; local paths are
-refused. HTTPS remotes authenticate with an access token, stored AES-256-GCM
-encrypted under a key that is generated once and kept in the database, or
-derived from `GIT_SECRET_KEY` when that is set. The token is never returned by
-the API and is stripped from git's error output. SSH remotes authenticate with a
-key mounted into the container, and run in batch mode so a missing key fails
-instead of hanging.
-
-Only the diagram owner can point a diagram at a repository or change the
-credential; anyone who can edit the diagram can push and pull it. Repository
-sync needs `git` on the server — the image installs it, and the panel says so
-when it is missing.
-
-When running behind a reverse proxy, forward `X-Forwarded-For` and
-`X-Forwarded-Proto`, and allow WebSocket `Upgrade`/`Connection` headers on the
-`/ws` path. The browser derives `ws://` or `wss://` from the current origin, so
-no public hostname or `localhost` value is required in production.
-
-## Contributing
-
-Please see [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
-
-## License and source availability
-
-This project is distributed under the
-[GNU Affero General Public License v3.0](LICENSE). It is based on
-[drawDB](https://github.com/drawdb-io/drawdb), which is also distributed under
-the GNU AGPL v3.0.
-
-If you interact with a deployed, modified version of this application over a
-network, you are entitled to receive the Corresponding Source for that version
-under section 13 of the GNU AGPL. The source for this version is available at:
-
-https://github.com/yms2772/drawdb-collaborative
-
-Copyright and attribution notices from the original project are retained. See
-the repository history for changes made by this fork.
-
-## Upstream project
-
-- Original source: [drawdb-io/drawdb](https://github.com/drawdb-io/drawdb)
-- Original project website: [drawdb.app](https://drawdb.app/)
-- Upstream community: [Discord](https://discord.gg/BrjZgNrmR6)
+[AGPL-3.0](LICENSE), heredada de [drawDB](https://github.com/drawdb-io/drawdb). Si ofreces
+una versión modificada a otras personas por red, tienen derecho a obtener su código fuente
+(sección 13). El código de esta versión está en <https://github.com/ElUtku/drawdb-collaborative>.

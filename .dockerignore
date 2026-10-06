@@ -25,6 +25,9 @@ temp
 # Ignore Docker-related files
 Dockerfile*
 docker-compose.yml
+compose.yml
+.git
+.github
 
 # Ignore IDE/editor specific files
 .vscode

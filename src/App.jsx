@@ -7,7 +7,6 @@ import RequireAuth from "./components/RequireAuth";
 // Each page is split out so that opening the landing page does not download the
 // editor (and vice versa).
 const Editor = lazy(() => import("./pages/Editor"));
-const BugReport = lazy(() => import("./pages/BugReport"));
 const Templates = lazy(() => import("./pages/Templates"));
 const LandingPage = lazy(() => import("./pages/LandingPage"));
 const Login = lazy(() => import("./pages/Login"));
@@ -39,7 +38,6 @@ export default function App() {
                 path="/editor/templates/:id"
                 element={protectedRoute(<Editor />)}
               />
-              <Route path="/bug-report" element={<BugReport />} />
               <Route path="/templates" element={<Templates />} />
               <Route path="*" element={<NotFound />} />
             </Routes>

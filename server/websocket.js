@@ -1,3 +1,4 @@
+/* global process */
 import { WebSocketServer, WebSocket } from "ws";
 import { parseCookies, SESSION_COOKIE } from "./auth.js";
 import {
@@ -16,6 +17,23 @@ const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 function send(socket, message) {
   if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
+  }
+}
+
+const EXTRA_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
+function originAllowed(request) {
+  const origin = request.headers.origin;
+  if (!origin) return true; // non-browser clients (tests, CLI tools)
+  if (EXTRA_ORIGINS.includes(origin.replace(/\/$/, ""))) return true;
+  const host = request.headers["x-forwarded-host"] || request.headers.host;
+  try {
+    return new URL(origin).host === String(host).split(",")[0].trim();
+  } catch {
+    return false;
   }
 }
 
@@ -58,6 +76,13 @@ export function attachCollaborationServer(server, store, auth) {
     const diagramId = match?.[1];
     if (!diagramId || !DIAGRAM_ID_PATTERN.test(diagramId)) {
       socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    // Browsers always send Origin on WebSocket handshakes. Rejecting foreign
+    // origins stops another site from riding the user's session cookie.
+    if (!originAllowed(request)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;
     }

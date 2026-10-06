@@ -5,6 +5,7 @@ import { Button } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 import { IconCopy, IconTick } from "@douyinfe/semi-icons";
 import { setUpDBML } from "./setUpDBML";
+import "./monacoLocal";
 
 export default function CodeEditor({
   showCopyButton,

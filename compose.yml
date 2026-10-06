@@ -2,12 +2,17 @@ services:
   drawdb:
     build: .
     image: drawdb-collaborative
+    container_name: drawdb-collaborative
     restart: unless-stopped
-    ports: 
-      - "3333:3000"
+    ports:
+      - "127.0.0.1:3000:3000"
     environment:
       PORT: 3000
       DATABASE_PATH: /data/drawdb.sqlite
+      # Opcionales: se leen del archivo .env si existe (ver .env.example).
+      GIT_SECRET_KEY: ${GIT_SECRET_KEY:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
     volumes:
       - drawdb-data:/data
 
