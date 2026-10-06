@@ -11,7 +11,7 @@
     "check:server": "for f in server/*.js server/routes/*.js; do node --check \"$f\" || exit 1; done",
     "test:server": "node --test server/server.test.js server/features.test.js",
     "test:git": "node --test server/git.test.js",
-    "test:import": "node --test src/utils/importSQL/normalize.test.js",
+    "test:import": "node --import ./scripts/test-loader.mjs --test src/utils/importSQL/normalize.test.js src/utils/importSQL/roundtrip.test.js",
     "build": "vite build && node scripts/third-party-licenses.mjs && node scripts/precompress.mjs",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "sbom": "npm sbom --sbom-format cyclonedx --omit dev --sbom-type application",
@@ -22,6 +22,7 @@
     "test:export": "node --import ./scripts/test-loader.mjs --test src/utils/exportSQL/exportSQL.test.js src/utils/exportSQL/migration.test.js src/utils/exportAs/protobuf.test.js src/utils/exportAs/cpp.test.js",
     "test:engines": "node --import ./scripts/test-loader.mjs scripts/sql-engines/run.js",
     "test:migrations": "node --import ./scripts/test-loader.mjs scripts/sql-engines/migrate.js",
+    "test:dumps": "node --import ./scripts/test-loader.mjs scripts/sql-engines/dumps.js",
     "test": "npm run test:server && npm run test:git && npm run test:import && npm run test:export",
     "licenses": "node scripts/third-party-licenses.mjs"
   },

@@ -33,7 +33,34 @@ export function importSQL(ast, toDb = DB.MYSQL, diagramDb = DB.GENERIC) {
       break;
   }
 
+  unescapeNames(diagram, toDb);
   arrangeTables(diagram);
 
   return diagram;
+}
+
+// The parsers keep a quote that is doubled inside a quoted name (`a``b`,
+// "a""b", [a]]b]) as two characters.
+function unescapeNames(diagram, database) {
+  const doubled =
+    database === DB.MYSQL || database === DB.MARIADB
+      ? /``/g
+      : database === DB.MSSQL
+        ? /\]\]/g
+        : /""/g;
+  const single = database === DB.MSSQL ? "]" : doubled.source[0];
+  const fix = (name) =>
+    typeof name === "string" ? name.replace(doubled, single) : name;
+  for (const table of diagram.tables ?? []) {
+    table.name = fix(table.name);
+    for (const field of table.fields ?? []) field.name = fix(field.name);
+    for (const index of table.indices ?? []) {
+      index.name = fix(index.name);
+      index.fields = (index.fields ?? []).map(fix);
+    }
+    for (const unique of table.uniqueConstraints ?? []) {
+      unique.name = fix(unique.name);
+      unique.fields = (unique.fields ?? []).map(fix);
+    }
+  }
 }

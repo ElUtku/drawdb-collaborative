@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { Cardinality, DB } from "../../data/constants";
 import { dbToTypes } from "../../data/datatypes";
-import { buildSQLFromAST } from "./shared";
+import { buildSQLFromAST, literalValue } from "./shared";
 
 const affinity = {
   [DB.SQLITE]: new Proxy(
@@ -41,10 +41,15 @@ export function fromSQLite(ast, diagramDb = DB.GENERIC) {
   const tables = [];
   const relationships = [];
 
-  const addRelationshipFromReferenceDef = (
+  const deferred = [];
+  // Resolved once every table is known: the referenced one may come later.
+  const addRelationshipFromReferenceDef = (...args) =>
+    deferred.push(() => addRelationship(...args));
+  const addRelationship = (
     startTable,
     startFieldNames,
     referenceDefinition,
+    constraintName,
   ) => {
     const relationship = {};
     const endTableName = referenceDefinition.table[0].table;
@@ -65,8 +70,9 @@ export function fromSQLite(ast, diagramDb = DB.GENERIC) {
 
     const startField = startTable.fields.find((f) => f.name === startFieldName);
 
+    // The declared name when there is one, so it survives a round trip.
     relationship.name =
-      "fk_" + startTable.name + "_" + startFieldName + "_" + endTableName;
+      constraintName || `fk_${startTable.name}_${startFieldNames.join("_")}`;
     relationship.startTableId = startTable.id;
     relationship.endTableId = endTable.id;
     relationship.fields = fieldPairs;
@@ -116,7 +122,8 @@ export function fromSQLite(ast, diagramDb = DB.GENERIC) {
             field.id = nanoid();
             field.name = d.column.column;
 
-            let type = d.definition.dataType;
+            // A column declared without a type has BLOB affinity.
+            let type = d.definition?.dataType ?? "BLOB";
             if (!dbToTypes[diagramDb][type]) {
               type = affinity[diagramDb][type];
             }
@@ -131,7 +138,7 @@ export function fromSQLite(ast, diagramDb = DB.GENERIC) {
             field.increment = false;
             if (d.auto_increment) field.increment = true;
             field.notNull = false;
-            if (d.nullable) field.notNull = true;
+            if (d.nullable?.type === "not null") field.notNull = true;
             field.primary = false;
             if (d.primary_key) field.primary = true;
             field.default = "";
@@ -157,7 +164,7 @@ export function fromSQLite(ast, diagramDb = DB.GENERIC) {
               } else if (d.default_val.value.type === "null") {
                 defaultValue = "NULL";
               } else {
-                defaultValue = d.default_val.value.value.toString();
+                defaultValue = literalValue(d.default_val.value, DB.SQLITE);
               }
               field.default = defaultValue;
             }
@@ -195,6 +202,7 @@ export function fromSQLite(ast, diagramDb = DB.GENERIC) {
                 table,
                 d.definition.map((c) => c.column),
                 d.reference_definition,
+                d.constraint,
               );
             } else if (d.constraint_type.toLowerCase().includes("unique")) {
               const fields = d.definition.map((c) => c.column);
@@ -212,9 +220,10 @@ export function fromSQLite(ast, diagramDb = DB.GENERIC) {
         tables.push(table);
       } else if (e.keyword === "index") {
         const index = {
-          name: e.index,
+          name: e.index?.name ?? e.index,
           unique: e.index_type === "unique",
-          fields: e.index_columns.map((f) => f.column),
+          // Quoted names come as strings: "a" is the column a here.
+          fields: e.index_columns.map((f) => f.column ?? f.value),
         };
 
         const table = tables.find((t) => t.name === e.table.table);
@@ -234,6 +243,8 @@ export function fromSQLite(ast, diagramDb = DB.GENERIC) {
   } else {
     parseSingleStatement(ast);
   }
+
+  for (const run of deferred) run();
 
   return { tables, relationships };
 }

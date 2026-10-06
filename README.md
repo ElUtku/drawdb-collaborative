@@ -23,6 +23,9 @@ preparado para autoalojarse, incluso en servidores sin Internet.
 - Exportación a **C++** (structs con `std::optional`, enums y, opcionalmente, tablas sqlpp11 y
   conversiones SOCI; ver [Exportar C++](#exportar-c)) y a **Protobuf** con numeración de
   campos estable (ver [Exportar Protobuf](#exportar-protobuf)).
+- **Importación de SQL** de cualquiera de esos motores, incluidos volcados de `pg_dump`,
+  `mysqldump`/`mariadb-dump`, `sqlite3 .dump`, scripts de SQL Server Management Studio y el DDL
+  de Oracle (`DBMS_METADATA.GET_DDL`); ver [Importar SQL](#importar-sql).
 - Tipos de columna personalizados compartidos por todo el servidor.
 - Registro de actividad, copias de seguridad automáticas y lista de componentes (SBOM).
 - Sincronización opcional de cada diagrama con un repositorio Git.
@@ -194,6 +197,37 @@ Límites conocidos: las expresiones `CHECK` y los valores por defecto con funcio
 cual (en un diagrama genérico deben usar funciones que existan en el motor de destino); y con
 **Oracle** anterior a 23ai no se pueden usar `JSON`, `VECTOR` ni `BOOLEAN` nativo.
 
+## Importar SQL
+
+**Archivo → Importar desde SQL** crea las tablas a partir de un script (pegado o subido como
+`.sql`). Antes de analizarlo se separa en sentencias respetando cadenas, nombres entre comillas
+y comentarios, y se descarta lo que no describe el esquema: `SET`, `PRAGMA`, transacciones,
+`GO`, `INSERT`/`COPY` con datos, bloqueos, secuencias, propietarios, permisos, opciones de
+almacenamiento (`TABLESPACE`, `WITH (...)`, `ON [PRIMARY]`...) y las protecciones con
+`IF EXISTS`/`DO` que escribe la exportación. Se recupera lo que esos volcados definen fuera
+del `CREATE TABLE`: claves primarias y únicas, claves foráneas (también las que apuntan a una
+tabla definida más adelante), `DEFAULT` y `CHECK` añadidos con `ALTER TABLE`, columnas
+`serial`/de identidad, índices, comentarios (`COMMENT ON`, propiedades extendidas de SQL Server
+y, en SQLite, las líneas `--` junto a tablas y columnas), enums y arrays de PostgreSQL. Los
+nombres con espacios, comillas, palabras reservadas o caracteres no ASCII se conservan.
+
+Cómo se ha comprobado (`npm run test:import`, `npm run test:dumps`):
+
+- El SQL exportado por la aplicación se vuelve a importar y exportar **idéntico** en los seis
+  motores, con todas las combinaciones de opciones de exportación.
+- Cada esquema de prueba se crea en el motor real, se vuelca con su propia herramienta
+  (`pg_dump`, `mysqldump`, `mariadb-dump`, `DBMS_METADATA.GET_DDL`, `sqlite_master`) y la
+  importación del volcado coincide con la del script original: tablas, tipos, tamaños, claves,
+  nulos, identidades, únicos, índices, FKs con sus acciones y comentarios.
+
+Lo que el motor normaliza en sus volcados llega normalizado: por ejemplo PostgreSQL escribe un
+`CHECK (total >= 0)` como `total >= (0)::NUMERIC` y MariaDB cambia `length()` por
+`octet_length()`. MySQL y MariaDB crean un índice para cada FK; si el volcado lo trae con el
+nombre de la FK no se importa como índice aparte (la FK lo vuelve a crear). SQLite no guarda los
+comentarios de tabla, que están fuera del `CREATE TABLE`. SQL Server no tiene una herramienta
+de línea de comandos que genere el DDL, así que con él se han probado scripts de Management
+Studio.
+
 ## Historial de versiones
 
 **Archivo → Historial de versiones** muestra las versiones guardadas del diagrama (una cada
@@ -321,7 +355,9 @@ npm run check:licenses   # falla si alguna dependencia no es software libre
 `npm run test:engines` ejecuta el SQL generado en motores reales a través de sus clientes de
 línea de comandos (SQLite siempre; el resto si defines `SQL_PSQL`, `SQL_MYSQL`, `SQL_MARIADB`,
 `SQL_SQLCMD` o `SQL_SQLPLUS`; ver `scripts/sql-engines/run.js`). `npm run test:migrations` hace
-lo mismo con las migraciones (`scripts/sql-engines/migrate.js`). `npm run test:cpp` compila la
+lo mismo con las migraciones (`scripts/sql-engines/migrate.js`), y `npm run test:dumps` importa
+lo que vuelca cada motor (necesita además `SQL_PG_DUMP`, `SQL_MYSQLDUMP` o `SQL_MARIADB_DUMP`;
+ver `scripts/sql-engines/dumps.js`). `npm run test:cpp` compila la
 exportación C++ con `g++`, y con sqlpp11 y SOCI si se indican sus rutas en `CPP_SQLPP11`,
 `CPP_DATE` y `CPP_SOCI` (ver `scripts/check-cpp.mjs`). Los tests de Protobuf usan `protoc` si
 está instalado.
@@ -329,7 +365,8 @@ está instalado.
 `npm run test:e2e` recorre la aplicación en un navegador real (Playwright, que se instala
 aparte con `npm install --no-save playwright`): crear, desactivar y eliminar cuentas; crear un
 diagrama; compartirlo como lector y como editor y ver los cambios de permisos en directo;
-historial, restauración y migración; exportaciones SQL, C++ y Protobuf; tipos personalizados;
+historial, restauración y migración; exportaciones SQL, C++ y Protobuf; importar un volcado de
+`pg_dump`; tipos personalizados;
 registro de actividad y copias de seguridad. Arranca su propio servidor con una base de datos
 temporal y comprueba también que ninguna petición sale del servidor.
 

@@ -25,8 +25,10 @@ import {
   useUndoRedo,
 } from "../../../hooks";
 import { isRtl } from "../../../i18n/utils/rtl";
-import { importSQL } from "../../../utils/importSQL";
-import { normalizeSQLForParser } from "../../../utils/importSQL/normalize";
+import {
+  diagramFromScript,
+  parseScript,
+} from "../../../utils/importSQL/script";
 import {
   getModalTitle,
   getModalWidth,
@@ -156,25 +158,18 @@ export default function Modal({
   const parseSQLAndLoadDiagram = async () => {
     const targetDatabase = database === DB.GENERIC ? importDb : database;
 
-    let ast = null;
+    // Statements that do not describe tables are left out, and what the
+    // parsers cannot read is set aside and applied after the import.
+    let parsed = null;
     try {
-      if (targetDatabase === DB.ORACLESQL) {
-        const { Parser: OracleParser } = await import("oracle-sql-parser");
-        const oracleParser = new OracleParser();
-
-        ast = oracleParser.parse(importSource.src);
-      } else {
-        const { Parser } = await import("node-sql-parser");
-        const parser = new Parser();
-        const normalizedSource = normalizeSQLForParser(
-          importSource.src,
-          targetDatabase,
-        );
-
-        ast = parser.astify(normalizedSource, {
-          database: targetDatabase,
-        });
-      }
+      const parsers =
+        targetDatabase === DB.ORACLESQL
+          ? { OracleParser: (await import("oracle-sql-parser")).Parser }
+          : { Parser: (await import("node-sql-parser")).Parser };
+      parsed = parseScript(importSource.src, {
+        database: targetDatabase,
+        ...parsers,
+      });
     } catch (error) {
       const message = error.location
         ? `${error.name} [Ln ${error.location.start.line}, Col ${error.location.start.column}]: ${error.message}`
@@ -185,11 +180,7 @@ export default function Modal({
     }
 
     try {
-      const diagramData = importSQL(
-        ast,
-        database === DB.GENERIC ? importDb : database,
-        database,
-      );
+      const diagramData = diagramFromScript(parsed, targetDatabase, database);
 
       if (importSource.overwrite) {
         setTables(diagramData.tables);
