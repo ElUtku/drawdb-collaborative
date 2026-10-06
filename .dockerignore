@@ -1,20 +1,17 @@
-# Ignore node_modules
+# Dependencies and build output are recreated inside the image
 node_modules
+dist
+source
 
-# Ignore logs
+# Local data and secrets
+data
+.env
+*.local
+
+# Logs and temporary files
 *.log
 logs
 *.log.*
-
-# Ignore environment variables
-.env
-
-# Ignore build directories and files
-dist
-build
-data
-
-# Ignore temporary files and directories
 tmp
 temp
 *.tmp
@@ -22,19 +19,12 @@ temp
 *.swo
 *.bak
 
-# Ignore Docker-related files
-Dockerfile*
-docker-compose.yml
-compose.yml
+# Version control and editor files
 .git
 .github
-
-# Ignore IDE/editor specific files
 .vscode
 .idea
 *.iml
 *.sublime-project
 *.sublime-workspace
-
-# Ignore OS-specific files
 .DS_Store

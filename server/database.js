@@ -38,6 +38,9 @@ export function openDatabase(databasePath = process.env.DATABASE_PATH) {
       FOREIGN KEY (diagram_id) REFERENCES diagrams(id) ON DELETE CASCADE
     );
 
+    CREATE INDEX IF NOT EXISTS applied_operations_created_at
+      ON applied_operations (created_at);
+
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT NOT NULL,
@@ -180,6 +183,13 @@ export function createDiagramStore(db) {
       return (
         db.prepare("DELETE FROM diagrams WHERE id = ?").run(id).changes > 0
       );
+    },
+    // Operation ids only catch a client resending an edit after a reconnect,
+    // so old ones can go; without this the table grows with every edit.
+    pruneOperations(olderThan) {
+      return db
+        .prepare("DELETE FROM applied_operations WHERE created_at < ?")
+        .run(olderThan.toISOString()).changes;
     },
   };
 }

@@ -83,6 +83,8 @@ const en = {
       "Are you sure you want to flush the storage? This will irreversibly delete all your diagrams and custom templates.",
     storage_flushed: "Storage flushed",
     help: "Help",
+    source_code: "Source code",
+    third_party_licenses: "Third-party licenses",
     shortcuts: "Shortcuts",
     ask_on_discord: "Ask us on Discord",
     feedback: "Feedback",
@@ -181,26 +183,202 @@ const en = {
       "*For the time being loading only MySQL scripts is supported.",
     blank: "Blank",
     filename: "Filename",
-    proto_advanced: "Advanced",
-    proto_section_file: "File",
-    proto_package: "Package",
-    proto_section_naming: "Naming",
-    proto_message_case: "Message names",
-    proto_keep_original: "Keep original",
-    proto_singularize: "Singular message names",
-    proto_singularize_hint: "users → User (English rules)",
-    proto_message_suffix: "Message suffix",
-    proto_field_case: "Field names",
-    proto_enum_values: "Enum values",
-    proto_enum_values_hint: "Prefixing avoids collisions between enums",
-    proto_section_types: "Types",
-    proto_nullable_optional: "Nullable columns as optional",
-    proto_section_output: "Output",
-    proto_comments: "Include comments",
-    proto_constraint_comments: "Annotate PK, unique and FK",
-    proto_service: "gRPC service",
-    proto_service_none: "None",
-    proto_service_crud: "CRUD per table",
+    export_advanced: "Advanced",
+    export_review: "Review",
+    proto_field_number: "Protobuf field number",
+    proto_field_number_hint:
+      "Never reuse a number once messages have been sent.",
+    proto_field_number_auto: "auto",
+    proto_save_numbers: "Save field numbers in the diagram",
+    proto_save_numbers_hint:
+      "Stores the numbers shown above on each column. From then on, adding, moving or deleting columns keeps existing numbers, and deleted ones are reserved.",
+    proto_opt_packageName: "Package",
+    proto_opt_packageName_desc:
+      "Package of the .proto file. Empty uses the diagram name.",
+    proto_opt_fieldCase: "Field names",
+    proto_opt_fieldCase_desc:
+      "How column names are written as fields. snake_case is the Protobuf style guide.",
+    proto_opt_fieldCase_snake: "snake_case",
+    proto_opt_fieldCase_camel: "camelCase",
+    proto_opt_fieldCase_original: "Keep original",
+    proto_opt_fieldNumbers: "Field numbers",
+    proto_opt_fieldNumbers_desc:
+      "Saved keeps the numbers stored in the diagram, so serialized data stays readable when columns change. By position renumbers 1, 2, 3… every time.",
+    proto_opt_fieldNumbers_stored: "Saved in the diagram",
+    proto_opt_fieldNumbers_position: "By position",
+    proto_opt_nullableAsOptional: "Nullable columns as optional",
+    proto_opt_nullableAsOptional_desc:
+      "Columns that allow NULL become optional fields, so 'not set' can be told apart from 0 or an empty string.",
+    proto_opt_includeComments: "Comments",
+    proto_opt_includeComments_desc:
+      "Copy table and column comments into the .proto file.",
+    proto_opt_service: "gRPC service",
+    proto_opt_service_desc:
+      "Also write a service with Get, List, Create, Update and Delete for each table.",
+    proto_opt_service_none: "None",
+    proto_opt_service_crud: "CRUD per table",
+    proto_opt_goPackage: "go_package",
+    proto_opt_goPackage_desc:
+      "Import path of the generated Go code. Empty leaves the option out.",
+    proto_opt_javaPackage: "java_package",
+    proto_opt_javaPackage_desc:
+      "Java package of the generated classes. Empty leaves the option out.",
+    proto_opt_javaMultipleFiles: "java_multiple_files",
+    proto_opt_javaMultipleFiles_desc:
+      "One Java file per message (only with a Java package).",
+    proto_opt_optimizeFor: "optimize_for",
+    proto_opt_optimizeFor_desc:
+      "C++/Java code generation: SPEED (protoc default), CODE_SIZE, or LITE_RUNTIME for the smaller libprotobuf-lite.",
+    proto_opt_optimizeFor_default: "Do not set",
+    proto_opt_optimizeFor_SPEED: "SPEED",
+    proto_opt_optimizeFor_CODE_SIZE: "CODE_SIZE",
+    proto_opt_optimizeFor_LITE_RUNTIME: "LITE_RUNTIME",
+    proto_opt_messageCase: "Message names",
+    proto_opt_messageCase_desc: "How table names are written as messages.",
+    proto_opt_messageCase_pascal: "PascalCase",
+    proto_opt_messageCase_original: "Keep original",
+    proto_opt_singularizeMessages: "Singular message names",
+    proto_opt_singularizeMessages_desc: "users → User (English rules).",
+    proto_opt_messageSuffix: "Message suffix",
+    proto_opt_messageSuffix_desc:
+      "Appended to every table message, for example Dto or Entity.",
+    proto_opt_enumValueStyle: "Enum values",
+    proto_opt_enumValueStyle_desc:
+      "Prefixing with the enum name (STATUS_PAID) avoids collisions; values sharing a scope are prefixed anyway when they would collide.",
+    proto_opt_enumValueStyle_prefixed: "STATUS_PAID",
+    proto_opt_enumValueStyle_plain: "PAID",
+    proto_opt_enumZeroName: "Name of the zero value",
+    proto_opt_enumZeroName_desc:
+      "proto3 enums start with a value 0 that means 'not set'; it is written as <ENUM>_<this name>.",
+    proto_opt_unsignedAs: "UNSIGNED integers",
+    proto_opt_unsignedAs_desc:
+      "uint32/uint64 hold the whole range of an UNSIGNED column; int32/int64 match signed code.",
+    proto_opt_unsignedAs_uint: "uint32 / uint64",
+    proto_opt_unsignedAs_int: "int32 / int64",
+    proto_opt_decimalAs: "DECIMAL / NUMERIC",
+    proto_opt_decimalAs_desc:
+      "string keeps exact decimals; double loses precision.",
+    proto_opt_decimalAs_string: "string",
+    proto_opt_decimalAs_double: "double",
+    proto_opt_timestampAs: "TIMESTAMP / DATETIME",
+    proto_opt_timestampAs_desc: "How date and time columns are carried.",
+    proto_opt_timestampAs_timestamp: "google.protobuf.Timestamp",
+    proto_opt_timestampAs_int64: "int64 (epoch)",
+    proto_opt_timestampAs_string: "string (ISO 8601)",
+    proto_opt_dateAs: "DATE",
+    proto_opt_dateAs_desc:
+      "google.type.Date needs google/type/date.proto from googleapis next to protoc.",
+    proto_opt_dateAs_string: "string",
+    proto_opt_dateAs_google_date: "google.type.Date",
+    proto_opt_jsonAs: "JSON / JSONB",
+    proto_opt_jsonAs_desc: "Value accepts any JSON; Struct only objects.",
+    proto_opt_jsonAs_value: "google.protobuf.Value",
+    proto_opt_jsonAs_struct: "google.protobuf.Struct",
+    proto_opt_jsonAs_string: "string",
+    proto_opt_uuidAs: "UUID",
+    proto_opt_uuidAs_desc: "string (36 characters) or bytes (16).",
+    proto_opt_uuidAs_string: "string",
+    proto_opt_uuidAs_bytes: "bytes",
+    proto_opt_includeConstraintComments: "Annotate keys and defaults",
+    proto_opt_includeConstraintComments_desc:
+      "Note the primary key, unique, auto-increment, foreign key and default of each column in a comment.",
+    sql_opt_existing: "If the objects already exist",
+    sql_opt_existing_desc:
+      "What the script does on a database that already has these tables.",
+    sql_opt_existing_create: "Fail (plain CREATE)",
+    sql_opt_existing_if_not_exists: "Keep them (IF NOT EXISTS)",
+    sql_opt_existing_drop_create: "Drop and recreate (deletes data)",
+    sql_opt_foreignKeys: "Foreign keys",
+    sql_opt_foreignKeys_desc:
+      "Inside CREATE TABLE or added at the end with ALTER TABLE. Automatic picks what works best for this database.",
+    sql_opt_foreignKeys_auto: "Automatic",
+    sql_opt_foreignKeys_alter: "ALTER TABLE at the end",
+    sql_opt_foreignKeys_inline: "Inside CREATE TABLE",
+    sql_opt_foreignKeys_none: "Leave out",
+    sql_opt_includeComments: "Comments",
+    sql_opt_includeComments_desc:
+      "Table and column comments (COMMENT, COMMENT ON or extended properties).",
+    sql_opt_includeIndexes: "Indexes",
+    sql_opt_includeIndexes_desc:
+      "The indexes drawn on each table. Primary and unique keys are always included.",
+    sql_opt_schema: "Schema",
+    sql_opt_schema_desc:
+      "Prefix every object with this schema (the database in MySQL, the owner in Oracle). Empty uses the connection's default.",
+    sql_opt_wrapInTransaction: "Single transaction",
+    sql_opt_wrapInTransaction_desc:
+      "Run the whole script between BEGIN and COMMIT, so it applies completely or not at all.",
+    sql_opt_nameConstraints: "Name constraints",
+    sql_opt_nameConstraints_desc:
+      "Give primary, unique and foreign keys explicit names (pk_…, uq_…, the relationship name) instead of letting the database invent them. Later migrations can refer to them.",
+    sql_opt_pkNamePattern: "Primary key name",
+    sql_opt_pkNamePattern_desc:
+      "Pattern for primary key names. {table} is replaced by the table name.",
+    sql_opt_identifierQuoting: "Quote names",
+    sql_opt_identifierQuoting_desc:
+      "Always keeps every name exactly as drawn. When needed leaves plain names unquoted (Oracle then stores them in upper case).",
+    sql_opt_identifierQuoting_always: "Always",
+    sql_opt_identifierQuoting_when_needed: "When needed",
+    sql_opt_tableOrder: "Table order",
+    sql_opt_tableOrder_desc:
+      "Dependencies first creates referenced tables before the tables that point to them.",
+    sql_opt_tableOrder_dependencies: "Dependencies first",
+    sql_opt_tableOrder_diagram: "As in the diagram",
+    sql_opt_tableOrder_alphabetical: "Alphabetical",
+    sql_opt_identityGeneration: "Identity columns",
+    sql_opt_identityGeneration_desc:
+      "BY DEFAULT still accepts explicit values (useful to migrate data); ALWAYS rejects them.",
+    sql_opt_identityGeneration_by_default: "GENERATED BY DEFAULT",
+    sql_opt_identityGeneration_always: "GENERATED ALWAYS",
+    sql_opt_includeChecks: "CHECK constraints",
+    sql_opt_includeChecks_desc:
+      "The CHECK expressions written on columns, plus the ones that emulate ENUM, BOOLEAN or JSON where the database lacks them.",
+    sql_opt_includeHeader: "Header comment",
+    sql_opt_includeHeader_desc:
+      "A first line saying which database the script is for.",
+    sql_opt_createSchema: "Create the schema",
+    sql_opt_createSchema_desc:
+      "Create the schema (the database in MySQL) if it does not exist. Only used when a schema is set.",
+    sql_opt_mysqlEngine: "Storage engine",
+    sql_opt_mysqlEngine_desc:
+      "ENGINE of every table. Foreign keys need InnoDB. Empty uses the server default.",
+    sql_opt_mysqlCharset: "Character set",
+    sql_opt_mysqlCharset_desc:
+      "DEFAULT CHARSET of every table. Empty uses the server default.",
+    sql_opt_mysqlCollation: "Collation",
+    sql_opt_mysqlCollation_desc:
+      "COLLATE of every table. Empty uses the default of the character set.",
+    sql_opt_mysqlIndexPrefix: "Key prefix for text columns",
+    sql_opt_mysqlIndexPrefix_desc:
+      "MySQL only indexes the first characters of TEXT and BLOB columns; this many are used in keys and indexes.",
+    sql_opt_jsonSchemaChecks: "Validate custom types",
+    sql_opt_jsonSchemaChecks_desc:
+      "Columns of a custom type become JSON with a CHECK (JSON_SCHEMA_VALID) that describes its fields (MySQL 8.0.17+).",
+    sql_opt_uuidAs: "UUID columns",
+    sql_opt_uuidAs_desc:
+      "Native uses the database's own UUID type when it has one (PostgreSQL, SQL Server, MariaDB 10.7+). Text stores 36 characters, binary 16 bytes.",
+    sql_opt_uuidAs_native: "Native type",
+    sql_opt_uuidAs_string: "Text (36)",
+    sql_opt_uuidAs_binary: "Binary (16)",
+    sql_opt_pgCreateExtensions: "Create extensions",
+    sql_opt_pgCreateExtensions_desc:
+      "Add CREATE EXTENSION for the types that need one (vector). Needs the privilege to create extensions.",
+    sql_opt_sqliteForeignKeysPragma: "Enable foreign keys",
+    sql_opt_sqliteForeignKeysPragma_desc:
+      "Add PRAGMA foreign_keys = ON. SQLite ignores foreign keys unless each connection turns them on.",
+    sql_opt_sqliteAutoincrement: "AUTOINCREMENT keyword",
+    sql_opt_sqliteAutoincrement_desc:
+      "Never reuse the ids of deleted rows. Without it an INTEGER PRIMARY KEY is still numbered automatically.",
+    sql_opt_mssqlBatchSeparator: "GO separators",
+    sql_opt_mssqlBatchSeparator_desc:
+      "Split the script into batches for SSMS and sqlcmd. Turn off to run it through a driver (ODBC, JDBC…).",
+    sql_opt_mssqlNativeJson: "Native JSON type",
+    sql_opt_mssqlNativeJson_desc:
+      "Use the JSON type of SQL Server 2025. Off, JSON columns are NVARCHAR(MAX) checked with ISJSON (2016+).",
+    sql_opt_oracleBoolean: "BOOLEAN columns",
+    sql_opt_oracleBoolean_desc:
+      "NUMBER(1) checked to 0/1 works on every version; the native BOOLEAN needs Oracle 23ai.",
+    sql_opt_oracleBoolean_number: "NUMBER(1)",
+    sql_opt_oracleBoolean_native: "BOOLEAN (23ai)",
     table_w_no_name: "Declared a table with no name",
     duplicate_table_by_name: "Duplicate table by the name '{{tableName}}'",
     empty_field_name: "Empty field `name` in table '{{tableName}}'",
@@ -358,6 +536,9 @@ const en = {
     create_admin_account: "Create the administrator account",
     create_admin_subtitle:
       "This instance has no accounts yet. The first account you create administers it and adds everyone else.",
+    setup_code: "Setup code",
+    setup_code_hint:
+      "Shown in the server log when it starts without accounts (or the SETUP_CODE you configured).",
     set_up_instance: "Set up this instance",
     registration_closed:
       "Accounts are created by the administrator of this instance.",

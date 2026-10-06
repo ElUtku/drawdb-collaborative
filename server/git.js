@@ -39,6 +39,36 @@ function requireString(value, field, max) {
   return text;
 }
 
+/** The host a remote URL points at, for the GIT_ALLOWED_HOSTS check. */
+export function remoteHost(url) {
+  if (SCP_LIKE_REMOTE.test(url)) {
+    return url.slice(url.indexOf("@") + 1, url.indexOf(":")).toLowerCase();
+  }
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * GIT_ALLOWED_HOSTS (comma-separated, "*.example.com" allowed) limits which
+ * servers the sync may contact. Without it any host is accepted, which lets
+ * every signed-in user make the server open connections inside its network.
+ */
+export function isAllowedHost(host, allowed = process.env.GIT_ALLOWED_HOSTS) {
+  const patterns = String(allowed ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  if (patterns.length === 0) return true;
+  return patterns.some((pattern) =>
+    pattern.startsWith("*.")
+      ? host.endsWith(pattern.slice(1)) && host.length > pattern.length - 1
+      : host === pattern,
+  );
+}
+
 export function normalizeRemoteUrl(value) {
   const url = requireString(value, "A repository URL", 500);
   // A leading dash would be read as a git option, and whitespace never belongs
@@ -52,15 +82,26 @@ export function normalizeRemoteUrl(value) {
     if (url.startsWith("file://") || path.isAbsolute(url)) return url;
   }
   if (
-    SCP_LIKE_REMOTE.test(url) ||
-    SSH_REMOTE.test(url) ||
-    HTTP_REMOTE.test(url)
+    !SCP_LIKE_REMOTE.test(url) &&
+    !SSH_REMOTE.test(url) &&
+    !HTTP_REMOTE.test(url)
   ) {
-    return url;
+    throw new GitError(
+      "Only https://, ssh:// and git@host:path repository URLs are supported",
+    );
   }
-  throw new GitError(
-    "Only https://, ssh:// and git@host:path repository URLs are supported",
-  );
+  if (HTTP_REMOTE.test(url) && /^[^/]*\/\/[^/@]*:[^/@]*@/.test(url)) {
+    // A token in the URL would be stored in clear; it has its own field.
+    throw new GitError(
+      "Put the access token in its own field, not in the repository URL",
+    );
+  }
+  if (!isAllowedHost(remoteHost(url))) {
+    throw new GitError(
+      "This server is not allowed to sync with that host (GIT_ALLOWED_HOSTS)",
+    );
+  }
+  return url;
 }
 
 export function normalizeBranch(value) {
@@ -157,12 +198,28 @@ export function redact(text, secrets = []) {
   return output.replace(/\/\/[^/@\s]*:[^/@\s]*@/g, "//***@");
 }
 
-export function withCredentials(remoteUrl, { authUsername, token } = {}) {
-  if (!token || !HTTP_REMOTE.test(remoteUrl)) return remoteUrl;
+/**
+ * Git configuration that authenticates HTTPS requests to `remoteUrl` with the
+ * stored token. It travels in the environment of the git process (readable
+ * only by the same user) rather than on its command line, and the header is
+ * scoped to the remote's own host, so a redirect elsewhere never receives it.
+ */
+export function credentialConfig(remoteUrl, { authUsername, token } = {}) {
+  if (!token || !HTTP_REMOTE.test(remoteUrl))
+    return { config: [], secrets: [] };
   const url = new URL(remoteUrl);
-  url.username = authUsername || DEFAULT_AUTH_USERNAME;
-  url.password = token;
-  return url.toString();
+  const basic = Buffer.from(
+    `${authUsername || DEFAULT_AUTH_USERNAME}:${token}`,
+  ).toString("base64");
+  return {
+    config: [
+      [
+        `http.${url.protocol}//${url.host}/.extraHeader`,
+        `Authorization: Basic ${basic}`,
+      ],
+    ],
+    secrets: [token, basic],
+  };
 }
 
 const FRIENDLY_ERRORS = [
@@ -201,7 +258,7 @@ function friendlyMessage(details) {
  */
 export async function git(
   args,
-  { cwd, secrets = [], timeout = COMMAND_TIMEOUT_MS, author } = {},
+  { cwd, secrets = [], timeout = COMMAND_TIMEOUT_MS, author, config = [] } = {},
 ) {
   const env = {
     ...process.env,
@@ -209,6 +266,12 @@ export async function git(
     GIT_CONFIG_NOSYSTEM: "1",
     LC_ALL: "C",
   };
+  // Settings that must not show up in the process list (credentials).
+  env.GIT_CONFIG_COUNT = String(config.length);
+  config.forEach(([key, value], i) => {
+    env[`GIT_CONFIG_KEY_${i}`] = key;
+    env[`GIT_CONFIG_VALUE_${i}`] = value;
+  });
   // Without this git can fall back to a GUI prompt and hang the request.
   delete env.GIT_ASKPASS;
   delete env.SSH_ASKPASS;
@@ -221,13 +284,31 @@ export async function git(
     env.GIT_COMMITTER_EMAIL = author.email;
   }
 
+  const localRemotes = process.env.GIT_ALLOW_LOCAL_REMOTES === "1";
   const options = [
     "-c",
     "credential.helper=",
     "-c",
     "core.autocrlf=false",
+    // A repository is untrusted input: check symbolic links out as plain files
+    // so a link cannot redirect our writes (say, onto the database), and never
+    // run hooks or helpers from the working copy.
     "-c",
-    "protocol.ext.allow=never",
+    "core.symlinks=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.https.allow=always",
+    "-c",
+    "protocol.http.allow=always",
+    "-c",
+    "protocol.ssh.allow=always",
+    "-c",
+    `protocol.file.allow=${localRemotes ? "always" : "never"}`,
     "-c",
     "advice.detachedHead=false",
   ];
@@ -253,7 +334,13 @@ export async function git(
 
 let gitAvailable = null;
 
+/** GIT_SYNC_ENABLED=false turns repository sync off for the whole server. */
+export function isGitSyncEnabled() {
+  return !/^(0|false|no|off)$/i.test(process.env.GIT_SYNC_ENABLED ?? "");
+}
+
 export async function isGitAvailable() {
+  if (!isGitSyncEnabled()) return false;
   if (gitAvailable === null) {
     try {
       await execFileAsync("git", ["--version"], {
@@ -269,6 +356,11 @@ export async function isGitAvailable() {
 }
 
 export async function requireGit() {
+  if (!isGitSyncEnabled()) {
+    throw new GitError("Repository sync is disabled on this server", {
+      status: 503,
+    });
+  }
   if (!(await isGitAvailable())) {
     throw new GitError(
       "git is not installed on the server, so repository sync is unavailable",

@@ -202,7 +202,8 @@ export default function DiagramContextProvider({ children }) {
       );
       return;
     }
-    const { fields, name } = tables.find((t) => t.id === tid);
+    const table = tables.find((t) => t.id === tid);
+    const { fields, name } = table;
     const referencesField = (r) =>
       getRelationshipFields(r).some(
         (p) =>
@@ -237,8 +238,20 @@ export default function DiagramContextProvider({ children }) {
       setRedoStack([]);
     }
     setRelationships((prev) => prev.filter((e) => !referencesField(e)));
+    // A Protobuf field number must never be reused once messages with it may
+    // exist, so the number (and name) of a deleted field stays reserved.
+    const protoNumber = Number(field.protoNumber);
+    const reserved = Number.isInteger(protoNumber) && protoNumber > 0;
     updateTable(tid, {
       fields: fields.filter((e) => e.id !== field.id),
+      ...(reserved && {
+        protoReserved: [
+          ...new Set([...(table.protoReserved ?? []), protoNumber]),
+        ],
+        protoReservedNames: [
+          ...new Set([...(table.protoReservedNames ?? []), field.name]),
+        ],
+      }),
     });
   };
 

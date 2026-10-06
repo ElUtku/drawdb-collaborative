@@ -345,6 +345,28 @@ export default function FieldDetails({ data, tid }) {
           />
         </div>
       )}
+      <div className="flex justify-between items-center my-2">
+        <div>
+          <div className="font-medium">{t("proto_field_number")}</div>
+          <div className="text-xs opacity-60">
+            {t("proto_field_number_hint")}
+          </div>
+        </div>
+        <InputNumber
+          className="w-28 shrink-0"
+          min={1}
+          max={536870911}
+          precision={0}
+          placeholder={t("proto_field_number_auto")}
+          value={data.protoNumber}
+          disabled={layout.readOnly}
+          onChange={(value) =>
+            updateField(tid, data.id, {
+              protoNumber: Number.isInteger(value) ? value : undefined,
+            })
+          }
+        />
+      </div>
       <div className="font-semibold">{t("comment")}</div>
       <TextArea
         className="my-2"

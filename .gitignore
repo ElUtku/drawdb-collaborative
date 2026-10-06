@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 .env
 data/
+
+# Source archive created inside the Docker build
+source/

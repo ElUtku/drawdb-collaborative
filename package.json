@@ -12,9 +12,13 @@
     "test:server": "node --test server/server.test.js",
     "test:git": "node --test server/git.test.js",
     "test:import": "node --test src/utils/importSQL/normalize.test.js",
-    "build": "vite build && node scripts/precompress.mjs",
+    "build": "vite build && node scripts/third-party-licenses.mjs && node scripts/precompress.mjs",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:export": "node --import ./scripts/test-loader.mjs --test src/utils/exportSQL/exportSQL.test.js src/utils/exportAs/protobuf.test.js",
+    "test:engines": "node --import ./scripts/test-loader.mjs scripts/sql-engines/run.js",
+    "test": "npm run test:server && npm run test:git && npm run test:import && npm run test:export",
+    "licenses": "node scripts/third-party-licenses.mjs"
   },
   "dependencies": {
     "@dbml/core": "^3.13.9",
@@ -50,8 +54,7 @@
     "react-dom": "^18.2.0",
     "react-hotkeys-hook": "^4.4.1",
     "react-i18next": "^14.1.1",
-    "react-router-dom": "^6.30.4",
-    "react-tweet": "^3.3.1",
+    "react-router-dom": "^7.18.4",
     "usehooks-ts": "^3.1.0",
     "uuid": "^14.0.1",
     "ws": "^8.21.1"
@@ -71,5 +74,8 @@
     "prettier": "3.2.5",
     "tailwindcss": "^4.0.14",
     "vite": "^8.1.0"
+  },
+  "overrides": {
+    "shell-quote": "^1.12.0"
   }
 }

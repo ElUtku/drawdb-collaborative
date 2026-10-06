@@ -10,12 +10,24 @@ services:
       PORT: 3000
       DATABASE_PATH: /data/drawdb.sqlite
       # Opcionales: se leen del archivo .env si existe (ver .env.example).
+      SETUP_CODE: ${SETUP_CODE:-}
       OPEN_REGISTRATION: ${OPEN_REGISTRATION:-false}
-      GIT_SECRET_KEY: ${GIT_SECRET_KEY:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      GIT_SYNC_ENABLED: ${GIT_SYNC_ENABLED:-true}
+      GIT_ALLOWED_HOSTS: ${GIT_ALLOWED_HOSTS:-}
+      GIT_SECRET_KEY: ${GIT_SECRET_KEY:-}
     volumes:
       - drawdb-data:/data
+    # Hardening: the app only writes to /data, so everything else is read-only.
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   drawdb-data:
