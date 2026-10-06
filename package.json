@@ -15,8 +15,9 @@
     "build": "vite build && node scripts/third-party-licenses.mjs && node scripts/precompress.mjs",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "test:export": "node --import ./scripts/test-loader.mjs --test src/utils/exportSQL/exportSQL.test.js src/utils/exportAs/protobuf.test.js",
+    "test:export": "node --import ./scripts/test-loader.mjs --test src/utils/exportSQL/exportSQL.test.js src/utils/exportSQL/migration.test.js src/utils/exportAs/protobuf.test.js",
     "test:engines": "node --import ./scripts/test-loader.mjs scripts/sql-engines/run.js",
+    "test:migrations": "node --import ./scripts/test-loader.mjs scripts/sql-engines/migrate.js",
     "test": "npm run test:server && npm run test:git && npm run test:import && npm run test:export",
     "licenses": "node scripts/third-party-licenses.mjs"
   },

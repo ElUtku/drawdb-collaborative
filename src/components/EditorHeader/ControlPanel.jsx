@@ -16,6 +16,8 @@ import icon from "../../assets/icon_dark_64.png";
 import UserMenu from "./UserMenu";
 import AdminButton from "./AdminButton";
 import GitPanel from "./GitPanel";
+import ShareModal from "./ShareModal";
+import HistoryModal from "./HistoryModal";
 import {
   Divider,
   Dropdown,
@@ -66,7 +68,7 @@ import LayoutDropdown from "./LayoutDropdown";
 import Sidesheet from "./SideSheet/Sidesheet";
 import Modal from "./Modal/Modal";
 import { useTranslation } from "react-i18next";
-import { generateSQL } from "../../utils/exportSQL";
+import { generateMigration, generateSQL } from "../../utils/exportSQL";
 import { loadExportOptions } from "../../utils/exportPreferences";
 import { databases } from "../../data/databases";
 import { jsonToMermaid } from "../../utils/exportAs/mermaid";
@@ -138,8 +140,9 @@ export default function ControlPanel({
   const { selectedElement, setSelectedElement } = useSelect();
   const { transform, setTransform } = useTransform();
   const { t, i18n } = useTranslation();
-  const { version, gistId, setGistId } = useContext(IdContext);
+  const { version, gistId, setGistId, role } = useContext(IdContext);
   const isTemplate = useMatch("/editor/templates/:id");
+  const storedDiagram = Boolean(diagramId) && !isTemplate;
   const navigate = useNavigateWithParams();
 
   // The SQL export keeps the diagram and settings so the dialog can rebuild
@@ -166,6 +169,47 @@ export default function ControlPanel({
       sqlDialect: dialect,
       sqlOptions,
       sqlIssues: issues,
+      migrationSource: null,
+    }));
+  };
+
+  // The diagram as it is now, as the server stores it.
+  const currentDocument = useMemo(
+    () => ({
+      database,
+      tables,
+      references: relationships,
+      notes,
+      ...(databases[database].hasEnums && { enums }),
+      ...(databases[database].hasTypes && { types }),
+    }),
+    [database, tables, relationships, notes, enums, types],
+  );
+
+  // ALTER script from a saved version to the diagram as it is now.
+  const openMigration = (before, { from }) => {
+    const dialect =
+      database === DB.GENERIC
+        ? exportData.migrationDialect ?? DB.POSTGRES
+        : database;
+    const migrationOptions = loadExportOptions(`migration.${dialect}`);
+    const to = t("migration_current", { name: title });
+    const { sql, issues } = generateMigration(before, currentDocument, {
+      dialect,
+      options: migrationOptions,
+      from,
+      to,
+    });
+    openExportModal(MODAL.CODE);
+    setExportData((prev) => ({
+      ...prev,
+      data: sql,
+      extension: "sql",
+      sqlSource: null,
+      migrationSource: { before, after: currentDocument, from, to },
+      migrationDialect: dialect,
+      migrationOptions,
+      migrationIssues: issues,
     }));
   };
 
@@ -1006,6 +1050,8 @@ export default function ControlPanel({
         disabled: layout.readOnly,
       },
       delete_diagram: {
+        // Only the owner may delete a diagram; the server checks it too.
+        disabled: !storedDiagram || role !== "owner",
         warning: {
           title: t("delete_diagram"),
           message: t("are_you_sure_delete_diagram"),
@@ -1028,6 +1074,14 @@ export default function ControlPanel({
             Toast.error(t("oops_smth_went_wrong"));
           }
         },
+      },
+      share: {
+        function: () => setModal(MODAL.SHARE),
+        disabled: !storedDiagram,
+      },
+      version_history: {
+        function: () => setModal(MODAL.HISTORY),
+        disabled: !storedDiagram,
       },
       git_sync: {
         function: () => setModal(MODAL.GIT),
@@ -1695,6 +1749,21 @@ export default function ControlPanel({
       <ConfigureCustomTypes
         open={modal === MODAL.CONFIG_CUSTOM_TYPES}
         onClose={() => setModal(MODAL.NONE)}
+      />
+      <ShareModal
+        open={modal === MODAL.SHARE}
+        onClose={() => setModal(MODAL.NONE)}
+        diagramId={diagramId}
+      />
+      <HistoryModal
+        open={modal === MODAL.HISTORY}
+        onClose={() => setModal(MODAL.NONE)}
+        diagramId={diagramId}
+        role={role}
+        currentName={title}
+        currentDocument={currentDocument}
+        onRestored={(diagram) => applyDiagram(diagram, { remote: true })}
+        onMigration={openMigration}
       />
       <GitPanel
         open={modal === MODAL.GIT}

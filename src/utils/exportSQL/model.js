@@ -322,7 +322,7 @@ export function buildModel(diagram, dialect, options) {
     }
     if (dialect === DB.POSTGRES) {
       const name = claimGenerated([ctx.table, ctx.column, "enum"]);
-      generatedEnums.push({ name, values, comment: "" });
+      generatedEnums.push({ name, values, comment: "", generated: true });
       const sql = qualify(name);
       return type === "SET"
         ? { sql: `${sql}[]`, base: name, kind: "array" }
@@ -508,7 +508,16 @@ export function buildModel(diagram, dialect, options) {
         column.defaultName = claimGenerated(["df", table.name, column.name]);
       }
 
+      // Each check is { name, expr }; named ones become table constraints so
+      // a migration can later drop them by name.
       column.checks = [];
+      const addCheck = (expr) =>
+        column.checks.push({
+          name: options.nameConstraints
+            ? claimGenerated(["ck", table.name, column.name])
+            : null,
+          expr,
+        });
       const check = String(field.check ?? "").trim();
       if (options.includeChecks && check) {
         const meta = sourceTypes[String(field.type ?? "").toUpperCase()];
@@ -518,7 +527,7 @@ export function buildModel(diagram, dialect, options) {
           report("warning", "check_ignored_type", { ...ctx, type: field.type });
         } else {
           if (generic) checkedColumns.push(`${table.name}.${column.name}`);
-          column.checks.push(
+          addCheck(
             quoteColumnsInExpression(
               check,
               table.columns.map((c) => c.name),
@@ -530,18 +539,16 @@ export function buildModel(diagram, dialect, options) {
       if (options.includeChecks) {
         const self = quote(column.name);
         if (column.emulatedEnum) {
-          column.checks.push(
-            `${self} IN (${column.enumValues.map(literal).join(", ")})`,
-          );
+          addCheck(`${self} IN (${column.enumValues.map(literal).join(", ")})`);
         }
-        if (column.booleanAsNumber) column.checks.push(`${self} IN (0, 1)`);
+        if (column.booleanAsNumber) addCheck(`${self} IN (0, 1)`);
         if (column.jsonCheck) {
-          column.checks.push(
+          addCheck(
             dialect === DB.MSSQL ? `ISJSON(${self}) = 1` : `${self} IS JSON`,
           );
         }
         if (column.jsonSchema && options.jsonSchemaChecks) {
-          column.checks.push(
+          addCheck(
             `JSON_SCHEMA_VALID(${literal(JSON.stringify(jsonSchemaFor(column.jsonSchema)))}, ${self})`,
           );
         }

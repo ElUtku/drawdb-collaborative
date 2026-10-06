@@ -7,6 +7,7 @@ import { DB } from "../../../data/constants";
 import { databases } from "../../../data/databases";
 import {
   getCustomTypes,
+  loadCustomTypes,
   saveCustomTypes,
   resolveType,
 } from "../../../utils/customTypes";
@@ -54,6 +55,7 @@ export default function ConfigureCustomTypes({ open, onClose }) {
   const [customTypes, setCustomTypes] = useState([]);
   const [filterDb, setFilterDb] = useState("");
   const savedTypesRef = useRef([]);
+  const [saving, setSaving] = useState(false);
 
   const addType = () => {
     setCustomTypes((prev) => [
@@ -76,7 +78,7 @@ export default function ConfigureCustomTypes({ open, onClose }) {
     setCustomTypes((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const invalid = customTypes.find((ct) => !ct.type.trim());
     if (invalid) {
       Toast.warning(t("type_name_required"));
@@ -105,7 +107,15 @@ export default function ConfigureCustomTypes({ open, onClose }) {
       }
     }
 
-    saveCustomTypes(newStored);
+    setSaving(true);
+    try {
+      await saveCustomTypes(newStored);
+    } catch (error) {
+      Toast.error(error.message || t("custom_types_save_failed"));
+      return;
+    } finally {
+      setSaving(false);
+    }
 
     setTables((prev) =>
       prev.map((table) => ({
@@ -135,9 +145,21 @@ export default function ConfigureCustomTypes({ open, onClose }) {
 
   useEffect(() => {
     if (!open) return;
-    const loaded = storedToArray(getCustomTypes());
-    setCustomTypes(loaded);
-    savedTypesRef.current = loaded;
+    let cancelled = false;
+    const show = () => {
+      if (cancelled) return;
+      const loaded = storedToArray(getCustomTypes());
+      setCustomTypes(loaded);
+      savedTypesRef.current = loaded;
+    };
+    show();
+    // Someone else may have changed the shared set since the editor loaded.
+    loadCustomTypes()
+      .then(show)
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   const filteredTypes = filterDb
@@ -166,7 +188,7 @@ export default function ConfigureCustomTypes({ open, onClose }) {
             <Button onClick={handleClose} type="tertiary">
               {t("close")}
             </Button>
-            <Button theme="solid" onClick={handleSave}>
+            <Button theme="solid" onClick={handleSave} loading={saving}>
               {t("save")}
             </Button>
           </div>

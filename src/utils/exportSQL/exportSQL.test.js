@@ -215,14 +215,28 @@ test("generic diagrams map their types to each engine", () => {
   assert.match(sql(DB.POSTGRES), /"c_uuid" UUID/);
   assert.match(sql(DB.MYSQL), /`c_uuid` CHAR\(36\)/);
   assert.match(sql(DB.MSSQL), /\[c_uuid\] UNIQUEIDENTIFIER/);
+  // Checks are named table constraints, so a migration can drop them.
+  assert.match(sql(DB.ORACLESQL), /"c_boolean" NUMBER\(1\) DEFAULT 1,/);
   assert.match(
     sql(DB.ORACLESQL),
-    /"c_boolean" NUMBER\(1\) DEFAULT 1 CHECK \("c_boolean" IN \(0, 1\)\)/,
+    /CONSTRAINT "ck_all_types_c_boolean" CHECK \("c_boolean" IN \(0, 1\)\)/,
   );
-  assert.match(sql(DB.MYSQL), /`c_custom` JSON CHECK \(JSON_SCHEMA_VALID\(/);
+  assert.match(
+    sql(DB.MYSQL),
+    /CONSTRAINT `ck_all_types_c_custom` CHECK \(JSON_SCHEMA_VALID\(/,
+  );
   assert.match(sql(DB.POSTGRES), /CREATE TYPE "point_t" AS/);
   assert.match(
     sql(DB.SQLITE),
+    /CONSTRAINT "ck_all_types_c_enum" CHECK \("c_enum" IN \('a', 'b''s', 'c\\d'\)\)/,
+  );
+  // Without named constraints they stay on their column.
+  const unnamed = generateSQL(diagram, {
+    dialect: DB.SQLITE,
+    options: { nameConstraints: false },
+  }).sql;
+  assert.match(
+    unnamed,
     /"c_enum" TEXT CHECK \("c_enum" IN \('a', 'b''s', 'c\\d'\)\)/,
   );
 });

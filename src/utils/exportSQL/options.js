@@ -235,31 +235,31 @@ function resolve(value, dialect) {
   return typeof value === "function" ? value(dialect) : value;
 }
 
-/** The settings that apply when exporting a `sourceDb` diagram to `dialect`. */
-export function sqlOptionDefsFor(dialect, sourceDb = dialect) {
-  return SQL_OPTION_DEFS.filter(
-    (def) =>
-      def.dialects.includes(dialect) &&
-      (!def.genericOnly || sourceDb === DB.GENERIC),
-  ).map((def) => ({
-    ...def,
-    default: resolve(def.default, dialect),
-    placeholder: resolve(def.placeholder, dialect),
-  }));
+/** The settings of `defs` that apply when exporting a `sourceDb` diagram. */
+export function optionDefsFor(defs, dialect, sourceDb = dialect) {
+  return defs
+    .filter(
+      (def) =>
+        def.dialects.includes(dialect) &&
+        (!def.genericOnly || sourceDb === DB.GENERIC),
+    )
+    .map((def) => ({
+      ...def,
+      default: resolve(def.default, dialect),
+      placeholder: resolve(def.placeholder, dialect),
+    }));
 }
 
-export function defaultSqlOptions(dialect) {
+export function defaultOptions(defs, dialect) {
   const defaults = {};
-  for (const def of SQL_OPTION_DEFS) {
-    defaults[def.key] = resolve(def.default, dialect);
-  }
+  for (const def of defs) defaults[def.key] = resolve(def.default, dialect);
   return defaults;
 }
 
 /** Defaults overlaid with `userOptions`, ignoring unknown or mistyped values. */
-export function normalizeSqlOptions(dialect, userOptions = {}) {
-  const options = defaultSqlOptions(dialect);
-  for (const def of SQL_OPTION_DEFS) {
+export function normalizeOptions(defs, dialect, userOptions = {}) {
+  const options = defaultOptions(defs, dialect);
+  for (const def of defs) {
     const value = userOptions?.[def.key];
     if (value === undefined || value === null) continue;
     if (def.type === "bool" && typeof value === "boolean") {
@@ -277,3 +277,62 @@ export function normalizeSqlOptions(dialect, userOptions = {}) {
   }
   return options;
 }
+
+export const sqlOptionDefsFor = (dialect, sourceDb = dialect) =>
+  optionDefsFor(SQL_OPTION_DEFS, dialect, sourceDb);
+
+export const defaultSqlOptions = (dialect) =>
+  defaultOptions(SQL_OPTION_DEFS, dialect);
+
+export const normalizeSqlOptions = (dialect, userOptions = {}) =>
+  normalizeOptions(SQL_OPTION_DEFS, dialect, userOptions);
+
+// --- Migrations ------------------------------------------------------------------
+// A migration takes the settings the database was created with (they decide
+// names and types) plus its own. Settings that only shape a full script, such
+// as what to do with existing tables, do not apply.
+const MIGRATION_SHARED = new Set([
+  "schema",
+  "includeComments",
+  "includeIndexes",
+  "wrapInTransaction",
+  "pkNamePattern",
+  "identifierQuoting",
+  "identityGeneration",
+  "includeChecks",
+  "includeHeader",
+  "mysqlEngine",
+  "mysqlCharset",
+  "mysqlCollation",
+  "mysqlIndexPrefix",
+  "jsonSchemaChecks",
+  "uuidAs",
+  "pgCreateExtensions",
+  "sqliteAutoincrement",
+  "mssqlBatchSeparator",
+  "mssqlNativeJson",
+  "oracleBoolean",
+]);
+
+export const MIGRATION_OPTION_DEFS = [
+  {
+    key: "destructive",
+    section: "basic",
+    type: "bool",
+    dialects: ALL,
+    default: true,
+  },
+  ...SQL_OPTION_DEFS.filter((def) => MIGRATION_SHARED.has(def.key)).map((def) =>
+    // A half-applied migration is worse than a half-created database.
+    def.key === "wrapInTransaction" ? { ...def, default: true } : def,
+  ),
+];
+
+export const migrationOptionDefsFor = (dialect, sourceDb = dialect) =>
+  optionDefsFor(MIGRATION_OPTION_DEFS, dialect, sourceDb);
+
+export const defaultMigrationOptions = (dialect) =>
+  defaultOptions(MIGRATION_OPTION_DEFS, dialect);
+
+export const normalizeMigrationOptions = (dialect, userOptions = {}) =>
+  normalizeOptions(MIGRATION_OPTION_DEFS, dialect, userOptions);

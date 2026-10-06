@@ -60,4 +60,35 @@ export const adminApi = {
     });
     return result.user;
   },
+  async setDisabled(userId, disabled) {
+    const result = await request(
+      `/api/admin/users/${encodeURIComponent(userId)}/disabled`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disabled }),
+      },
+    );
+    return result.user;
+  },
+  deleteUser(userId, transferTo) {
+    const query = new URLSearchParams({ transferTo }).toString();
+    return request(`/api/admin/users/${encodeURIComponent(userId)}?${query}`, {
+      method: "DELETE",
+    });
+  },
+  async audit(filters = {}) {
+    const query = new URLSearchParams(
+      Object.entries(filters).filter(([, value]) => value),
+    ).toString();
+    const result = await request(`/api/admin/audit?${query}`);
+    return result.entries;
+  },
+  backups() {
+    return request("/api/admin/backups");
+  },
+  async createBackup() {
+    const result = await request("/api/admin/backups", { method: "POST" });
+    return result.backup;
+  },
 };

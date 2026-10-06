@@ -199,6 +199,13 @@ export function attachCollaborationServer(server, { store, auth, diagrams }) {
         send(socket, {
           type: MESSAGE_TYPES.ERROR,
           code: "read_only",
+          // Echoed so the client can settle the request it is waiting on.
+          ...(CLIENT_ID_PATTERN.test(message.operationId || "") && {
+            operationId: message.operationId,
+          }),
+          ...(CLIENT_ID_PATTERN.test(message.requestId || "") && {
+            requestId: message.requestId,
+          }),
           message: "You can only view this diagram",
         });
         return;

@@ -17,6 +17,7 @@ import {
   useDiagram,
   useEnums,
   useLayout,
+  useCustomTypesVersion,
 } from "../../../hooks";
 import { useTranslation } from "react-i18next";
 import { dbToTypes } from "../../../data/datatypes";
@@ -30,6 +31,8 @@ export default function TypeField({ data, tid, fid }) {
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const [editField, setEditField] = useState({});
   const { t } = useTranslation();
+  // Re-render when the shared custom types change.
+  useCustomTypesVersion();
 
   return (
     <Row gutter={6} className="hover-1 my-2">
@@ -83,7 +86,8 @@ export default function TypeField({ data, tid, fid }) {
             })),
             ...types
               .filter(
-                (type) => type.name.toLowerCase() !== types[tid].name.toLowerCase(),
+                (type) =>
+                  type.name.toLowerCase() !== types[tid].name.toLowerCase(),
               )
               .map((type) => ({
                 label: type.name.toUpperCase(),

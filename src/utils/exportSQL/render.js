@@ -6,7 +6,7 @@ import { DB } from "../../data/constants";
 import { DIALECT_NAMES } from "./model";
 import { lineComment, stringLiteral } from "./names";
 
-const INDENT = "  ";
+export const INDENT = "  ";
 
 function header(model) {
   if (!model.options.includeHeader) return [];
@@ -19,7 +19,7 @@ function header(model) {
   ];
 }
 
-function keyColumns(model, columns) {
+export function keyColumns(model, columns) {
   return columns
     .map(
       ({ column, prefix }) =>
@@ -28,15 +28,15 @@ function keyColumns(model, columns) {
     .join(", ");
 }
 
-function plainColumns(model, columns) {
+export function plainColumns(model, columns) {
   return columns.map((column) => model.quote(column.name)).join(", ");
 }
 
-function constraintPrefix(model, name) {
+export function constraintPrefix(model, name) {
   return name ? `CONSTRAINT ${model.quote(name)} ` : "";
 }
 
-function foreignKeyClause(model, fk, { ifNotExists = false } = {}) {
+export function foreignKeyClause(model, fk, { ifNotExists = false } = {}) {
   const actions = [
     fk.onDelete ? ` ON DELETE ${fk.onDelete}` : "",
     fk.onUpdate ? ` ON UPDATE ${fk.onUpdate}` : "",
@@ -44,11 +44,27 @@ function foreignKeyClause(model, fk, { ifNotExists = false } = {}) {
   return `${constraintPrefix(model, fk.name)}FOREIGN KEY ${ifNotExists ? "IF NOT EXISTS " : ""}(${plainColumns(model, fk.columns)}) REFERENCES ${fk.parent.sql} (${plainColumns(model, fk.refColumns)})${actions}`;
 }
 
+// Unnamed checks stay on their column; named ones are table constraints.
 function checks(column) {
-  return column.checks.map((check) => ` CHECK (${check})`).join("");
+  return column.checks
+    .filter((check) => !check.name)
+    .map((check) => ` CHECK (${check.expr})`)
+    .join("");
 }
 
-function truncateComment(model, text, max, object) {
+export function checkClause(model, check) {
+  return `${constraintPrefix(model, check.name)}CHECK (${check.expr})`;
+}
+
+function namedChecks(model, table) {
+  return table.columns.flatMap((column) =>
+    column.checks
+      .filter((check) => check.name)
+      .map((check) => checkClause(model, check)),
+  );
+}
+
+export function truncateComment(model, text, max, object) {
   if (text.length <= max) return text;
   model.issues.push({
     level: "warning",
@@ -60,7 +76,7 @@ function truncateComment(model, text, max, object) {
 
 /** Lines inside CREATE TABLE ( ... ) that come after the columns. */
 function tableConstraints(model, table, { prefixKeys = false } = {}) {
-  const lines = [];
+  const lines = namedChecks(model, table);
   if (table.primaryKey) {
     lines.push(
       `${constraintPrefix(model, table.primaryKey.name)}PRIMARY KEY (${
@@ -104,6 +120,25 @@ function createTableBody(lines) {
 
 // --- MySQL and MariaDB ----------------------------------------------------------
 
+function mysqlColumn(model, table, column, { identity = true } = {}) {
+  const { options, quote, literal } = model;
+  let line = `${quote(column.name)} ${column.sql}`;
+  if (column.unsigned) line += " UNSIGNED";
+  if (column.notNull) line += " NOT NULL";
+  if (column.defaultSql !== null) line += ` DEFAULT ${column.defaultSql}`;
+  if (column.identity && identity) line += " AUTO_INCREMENT";
+  if (options.includeComments && column.comment.trim()) {
+    const text = truncateComment(
+      model,
+      column.comment,
+      1024,
+      `${table.name}.${column.name}`,
+    );
+    line += ` COMMENT ${literal(text)}`;
+  }
+  return line;
+}
+
 function renderMySQL(model) {
   const { options, quote, literal } = model;
   const out = [...header(model)];
@@ -124,23 +159,9 @@ function renderMySQL(model) {
   }
 
   for (const table of model.tables) {
-    const lines = table.columns.map((column) => {
-      let line = `${quote(column.name)} ${column.sql}`;
-      if (column.unsigned) line += " UNSIGNED";
-      if (column.notNull) line += " NOT NULL";
-      if (column.defaultSql !== null) line += ` DEFAULT ${column.defaultSql}`;
-      if (column.identity) line += " AUTO_INCREMENT";
-      if (options.includeComments && column.comment.trim()) {
-        const text = truncateComment(
-          model,
-          column.comment,
-          1024,
-          `${table.name}.${column.name}`,
-        );
-        line += ` COMMENT ${literal(text)}`;
-      }
-      return line + checks(column);
-    });
+    const lines = table.columns.map(
+      (column) => mysqlColumn(model, table, column) + checks(column),
+    );
     lines.push(...tableConstraints(model, table, { prefixKeys: true }));
     for (const index of table.indexes) {
       lines.push(
@@ -194,10 +215,22 @@ function renderMySQL(model) {
 
 // --- PostgreSQL ------------------------------------------------------------------
 
-function pgGuard(statement) {
+export function pgGuard(statement) {
   // Runs `statement` and ignores "already exists", so the script can re-run.
   const tag = statement.includes("$drawdb$") ? "$drawdb_ddl$" : "$drawdb$";
   return `DO ${tag}\nBEGIN\n${INDENT}${statement.replace(/\n/g, `\n${INDENT}`)}\nEXCEPTION\n${INDENT}WHEN duplicate_object THEN NULL;\nEND ${tag};`;
+}
+
+export function identityClause(model) {
+  return `GENERATED ${model.options.identityGeneration === "always" ? "ALWAYS" : "BY DEFAULT"} AS IDENTITY`;
+}
+
+function postgresColumn(model, column) {
+  let line = `${model.quote(column.name)} ${column.sql}`;
+  if (column.identity && !column.serial) line += ` ${identityClause(model)}`;
+  if (column.notNull) line += " NOT NULL";
+  if (column.defaultSql !== null) line += ` DEFAULT ${column.defaultSql}`;
+  return line;
 }
 
 function renderPostgres(model) {
@@ -250,15 +283,9 @@ function renderPostgres(model) {
   }
 
   for (const table of model.tables) {
-    const lines = table.columns.map((column) => {
-      let line = `${quote(column.name)} ${column.sql}`;
-      if (column.identity && !column.serial) {
-        line += ` GENERATED ${options.identityGeneration === "always" ? "ALWAYS" : "BY DEFAULT"} AS IDENTITY`;
-      }
-      if (column.notNull) line += " NOT NULL";
-      if (column.defaultSql !== null) line += ` DEFAULT ${column.defaultSql}`;
-      return line + checks(column);
-    });
+    const lines = table.columns.map(
+      (column) => postgresColumn(model, column) + checks(column),
+    );
     lines.push(...tableConstraints(model, table));
     lines.push(...inlineForeignKeys(model, table));
     const inherits = table.inherits.length
@@ -299,6 +326,17 @@ function renderPostgres(model) {
 
 // --- SQLite ------------------------------------------------------------------------
 
+function sqliteColumn(model, column) {
+  let line = `${model.quote(column.name)} ${column.sql}`;
+  if (column.sqliteRowid) {
+    line += " PRIMARY KEY";
+    if (model.options.sqliteAutoincrement) line += " AUTOINCREMENT";
+  }
+  if (column.notNull) line += " NOT NULL";
+  if (column.defaultSql !== null) line += ` DEFAULT ${column.defaultSql}`;
+  return line;
+}
+
 function renderSQLite(model) {
   const { options, quote } = model;
   const out = [...header(model)];
@@ -323,14 +361,7 @@ function renderSQLite(model) {
         options.includeComments && column.comment.trim()
           ? `${lineComment(column.comment)}\n${INDENT}`
           : "";
-      let line = `${quote(column.name)} ${column.sql}`;
-      if (column.sqliteRowid) {
-        line += " PRIMARY KEY";
-        if (options.sqliteAutoincrement) line += " AUTOINCREMENT";
-      }
-      if (column.notNull) line += " NOT NULL";
-      if (column.defaultSql !== null) line += ` DEFAULT ${column.defaultSql}`;
-      return comment + line + checks(column);
+      return comment + sqliteColumn(model, column) + checks(column);
     });
     lines.push(...tableConstraints(model, table));
     lines.push(...inlineForeignKeys(model, table));
@@ -359,6 +390,20 @@ function renderSQLite(model) {
 }
 
 // --- SQL Server ------------------------------------------------------------------------
+
+function mssqlColumn(model, column, { withDefault = true } = {}) {
+  const { quote } = model;
+  let line = `${quote(column.name)} ${column.sql}`;
+  if (column.defaultSql !== null && withDefault) {
+    const name = column.defaultName
+      ? `CONSTRAINT ${quote(column.defaultName)} `
+      : "";
+    line += ` ${name}DEFAULT ${column.defaultSql}`;
+  }
+  if (column.identity) line += " IDENTITY(1,1)";
+  line += column.notNull ? " NOT NULL" : " NULL";
+  return line;
+}
 
 function renderMSSQL(model) {
   const { options, quote, literal, qualify } = model;
@@ -412,18 +457,9 @@ function renderMSSQL(model) {
   };
 
   for (const table of model.tables) {
-    const lines = table.columns.map((column) => {
-      let line = `${quote(column.name)} ${column.sql}`;
-      if (column.defaultSql !== null) {
-        const name = column.defaultName
-          ? `CONSTRAINT ${quote(column.defaultName)} `
-          : "";
-        line += ` ${name}DEFAULT ${column.defaultSql}`;
-      }
-      if (column.identity) line += " IDENTITY(1,1)";
-      line += column.notNull ? " NOT NULL" : " NULL";
-      return line + checks(column);
-    });
+    const lines = table.columns.map(
+      (column) => mssqlColumn(model, column) + checks(column),
+    );
     lines.push(...tableConstraints(model, table));
     lines.push(...inlineForeignKeys(model, table));
     const create = `CREATE TABLE ${table.sql} (\n${createTableBody(lines)}\n);`;
@@ -476,7 +512,7 @@ function renderMSSQL(model) {
 
 // --- Oracle ------------------------------------------------------------------------------
 
-function oracleBlock(statement, ignoredCodes) {
+export function oracleBlock(statement, ignoredCodes) {
   const ddl = statement.replace(/;\s*$/, "");
   const condition =
     ignoredCodes.length === 1
@@ -499,6 +535,14 @@ function oracleBlock(statement, ignoredCodes) {
 // ORA-01408 column list already indexed.
 const ORACLE_EXISTS = [-955, -2260, -2261, -2275, -1408];
 
+function oracleColumn(model, column) {
+  let line = `${model.quote(column.name)} ${column.sql}`;
+  if (column.identity) line += ` ${identityClause(model)}`;
+  else if (column.defaultSql !== null) line += ` DEFAULT ${column.defaultSql}`;
+  if (column.notNull) line += " NOT NULL";
+  return line;
+}
+
 function renderOracle(model) {
   const { options, quote, literal, qualify } = model;
   const out = [...header(model)];
@@ -517,16 +561,9 @@ function renderOracle(model) {
   }
 
   for (const table of model.tables) {
-    const lines = table.columns.map((column) => {
-      let line = `${quote(column.name)} ${column.sql}`;
-      if (column.identity) {
-        line += ` GENERATED ${options.identityGeneration === "always" ? "ALWAYS" : "BY DEFAULT"} AS IDENTITY`;
-      } else if (column.defaultSql !== null) {
-        line += ` DEFAULT ${column.defaultSql}`;
-      }
-      if (column.notNull) line += " NOT NULL";
-      return line + checks(column);
-    });
+    const lines = table.columns.map(
+      (column) => oracleColumn(model, column) + checks(column),
+    );
     lines.push(...tableConstraints(model, table));
     lines.push(...inlineForeignKeys(model, table));
     out.push(ddl(`CREATE TABLE ${table.sql} (\n${createTableBody(lines)}\n);`));
@@ -567,6 +604,29 @@ function renderOracle(model) {
     );
   }
   return out.join("\n\n");
+}
+
+/**
+ * One column as CREATE TABLE or ALTER TABLE ... ADD prints it, without its
+ * checks. `identity: false` leaves out MySQL's AUTO_INCREMENT and
+ * `withDefault: false` SQL Server's default constraint.
+ */
+export function columnDefinition(model, table, column, flags = {}) {
+  switch (model.dialect) {
+    case DB.MYSQL:
+    case DB.MARIADB:
+      return mysqlColumn(model, table, column, flags);
+    case DB.POSTGRES:
+      return postgresColumn(model, column);
+    case DB.SQLITE:
+      return sqliteColumn(model, column);
+    case DB.MSSQL:
+      return mssqlColumn(model, column, flags);
+    case DB.ORACLESQL:
+      return oracleColumn(model, column);
+    default:
+      return "";
+  }
 }
 
 export function renderModel(model) {

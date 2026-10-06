@@ -9,13 +9,19 @@ import {
 } from "@douyinfe/semi-ui";
 import { Action, ObjectType } from "../../../data/constants";
 import { IconDeleteStroked } from "@douyinfe/semi-icons";
-import { useDiagram, useLayout, useUndoRedo } from "../../../hooks";
+import {
+  useCustomTypesVersion,
+  useDiagram,
+  useLayout,
+  useUndoRedo,
+} from "../../../hooks";
 import { useTranslation } from "react-i18next";
 import { databases } from "../../../data/databases";
 import { resolveType } from "../../../utils/customTypes";
 
 export default function FieldDetails({ data, tid }) {
   const { t } = useTranslation();
+  useCustomTypesVersion();
   const { layout } = useLayout();
   const { tables, database } = useDiagram();
   const resolved = resolveType(database, data.type);

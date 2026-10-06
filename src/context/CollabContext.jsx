@@ -38,6 +38,9 @@ function getLocalIdentity() {
   return identity;
 }
 
+// Close code the server uses when this account loses access to the diagram.
+const ACCESS_REVOKED = 4403;
+
 export const CollabContext = createContext(null);
 
 export default function CollabContextProvider({ children }) {
@@ -78,6 +81,27 @@ export default function CollabContextProvider({ children }) {
       versionRef.current = message.version;
       setConnectionState(CONNECTION_STATE.CONNECTED);
       reconnectAttemptsRef.current = 0;
+      if (message.role) sessionRef.current?.onAccess?.(message.role);
+      return;
+    }
+    if (message.type === MESSAGE_TYPES.ACCESS) {
+      sessionRef.current?.onAccess?.(message.role);
+      return;
+    }
+    if (message.type === MESSAGE_TYPES.ERROR) {
+      const pending = pendingRef.current.get(message.operationId);
+      if (pending) {
+        pendingRef.current.delete(message.operationId);
+        pending.reject(
+          Object.assign(new Error(message.message), { code: message.code }),
+        );
+      }
+      const lock = pendingLocksRef.current.get(message.requestId);
+      if (lock) {
+        pendingLocksRef.current.delete(message.requestId);
+        pendingLocksByTableRef.current.delete(lock.tableId);
+        lock.resolve(false);
+      }
       return;
     }
     if (
@@ -183,9 +207,23 @@ export default function CollabContextProvider({ children }) {
         );
       };
       socket.onmessage = handleMessage;
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         if (socketRef.current !== socket) return;
         socketRef.current = null;
+        for (const pending of pendingRef.current.values()) {
+          pending.reject(new Error("Collaboration connection closed"));
+        }
+        pendingRef.current.clear();
+        if (event.code === ACCESS_REVOKED) {
+          // Signed out, account disabled, diagram deleted or unshared:
+          // reconnecting would only be refused again.
+          setConnectionState(CONNECTION_STATE.DISCONNECTED);
+          setParticipants([]);
+          setRemoteCursors({});
+          setTableLocks({});
+          sessionRef.current?.onAccess?.("none");
+          return;
+        }
         setConnectionState(CONNECTION_STATE.CONNECTING);
         const delay = Math.min(
           1000 * 2 ** reconnectAttemptsRef.current,
@@ -203,16 +241,23 @@ export default function CollabContextProvider({ children }) {
   );
 
   const connect = useCallback(
-    ({ diagramId, version, onSnapshot, onDelta }) => {
+    ({ diagramId, version, onSnapshot, onDelta, onAccess }) => {
       if (sessionRef.current?.diagramId === diagramId) {
         sessionRef.current.onSnapshot = onSnapshot;
         sessionRef.current.onDelta = onDelta;
+        sessionRef.current.onAccess = onAccess;
         versionRef.current = version;
+        if (!socketRef.current) {
+          // The server closed the previous connection (for instance when
+          // access was revoked and then granted again): open a new one.
+          window.clearTimeout(reconnectRef.current);
+          openSocket(sessionRef.current);
+        }
         return;
       }
       window.clearTimeout(reconnectRef.current);
       socketRef.current?.close();
-      sessionRef.current = { diagramId, onSnapshot, onDelta };
+      sessionRef.current = { diagramId, onSnapshot, onDelta, onAccess };
       versionRef.current = version;
       setRemoteCursors({});
       setTableLocks({});

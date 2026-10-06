@@ -9,6 +9,8 @@ import SidePanel from "./EditorSidePanel/SidePanel";
 import { DB, State } from "../data/constants";
 import { db } from "../data/db";
 import { diagramApi } from "../api/diagrams";
+import { loadCustomTypes } from "../utils/customTypes";
+import i18next from "../i18n/i18n";
 import {
   useLayout,
   useSettings,
@@ -24,7 +26,7 @@ import {
   useCollab,
 } from "../hooks";
 import FloatingControls from "./FloatingControls";
-import { Button, Modal, Tag } from "@douyinfe/semi-ui";
+import { Button, Modal, Tag, Toast } from "@douyinfe/semi-ui";
 import { IconAlertTriangle } from "@douyinfe/semi-icons";
 import { useTranslation } from "react-i18next";
 import { databases } from "../data/databases";
@@ -36,7 +38,10 @@ export const IdContext = createContext({
   setGistId: () => {},
   version: "",
   setVersion: () => {},
+  role: "owner",
 });
+
+const canEdit = (role) => role === "owner" || role === "editor";
 
 const SIDEPANEL_MIN_WIDTH = 374;
 
@@ -56,6 +61,9 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
   const loadedIdRef = useRef(null);
   const saveTimerRef = useRef(null);
   const applyingRemoteRef = useRef(false);
+  // The caller's role on the open diagram; viewers get a read-only editor.
+  const [role, setRole] = useState("owner");
+  const roleRef = useRef(role);
   const { layout, setLayout } = useLayout();
   const { settings } = useSettings();
   const { types, setTypes } = useTypes();
@@ -83,6 +91,19 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
   } = useCollab();
   const { t, i18n } = useTranslation();
   const { id: routeDiagramId } = useParams();
+
+  const applyRole = useCallback(
+    (next) => {
+      roleRef.current = next;
+      setRole(next);
+      setLayout((prev) =>
+        prev.readOnly === !canEdit(next)
+          ? prev
+          : { ...prev, readOnly: !canEdit(next) },
+      );
+    },
+    [setLayout],
+  );
   const loadedDiagramId = forcedDiagramId ?? routeDiagramId;
   const editorDiagramMatch = useMatch("/editor/diagrams/:id");
   const directDiagramMatch = useMatch("/diagrams/:id");
@@ -214,17 +235,28 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
       setTransform({ zoom: 1, pan: { x: 0, y: 0 } });
       setTitle("Untitled diagram");
       setGistId("");
-      setLayout((prev) => ({ ...prev, readOnly: false }));
+      applyRole("owner");
     };
 
     const loadDiagram = async (id) => {
       try {
         const diagram = await diagramApi.get(id);
-        setLayout((prev) => ({ ...prev, readOnly: false }));
+        applyRole(diagram.role ?? "editor");
         applyDiagramState(diagram);
         connect({
           diagramId: id,
           version: diagram.version,
+          onAccess: (next) => {
+            const previous = roleRef.current;
+            if (next === previous) return;
+            applyRole(next);
+            // i18next directly: the language must not be a dependency of load.
+            if (next === "none") Toast.warning(i18next.t("access_revoked"));
+            else if (!canEdit(next)) Toast.info(i18next.t("access_now_viewer"));
+            else if (!canEdit(previous)) {
+              Toast.success(i18next.t("access_now_editor"));
+            }
+          },
           onSnapshot: (snapshot) => {
             applyDiagramState(snapshot, { remote: true });
             setSaveState(State.SAVED);
@@ -301,7 +333,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     setEnums,
     selectedDb,
     setSaveState,
-    setLayout,
+    applyRole,
     isDiagram,
     isTemplate,
     loadedDiagramId,
@@ -309,7 +341,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
 
   const returnToCurrentDiagram = async () => {
     await load();
-    setLayout((prev) => ({ ...prev, readOnly: false }));
+    setLayout((prev) => ({ ...prev, readOnly: !canEdit(roleRef.current) }));
     setVersion(null);
   };
 
@@ -318,6 +350,8 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
       applyingRemoteRef.current = false;
       return;
     }
+    // Viewers may pan and zoom, but there is nothing of theirs to save.
+    if (!canEdit(roleRef.current)) return;
     if (
       tables?.length === 0 &&
       areas?.length === 0 &&
@@ -366,9 +400,18 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     load();
   }, [load]);
 
+  useEffect(() => {
+    // Custom types are shared on the server; pick up the current set.
+    loadCustomTypes().catch((error) =>
+      console.warn("custom types load failed:", error),
+    );
+  }, []);
+
   return (
     <div className="h-full flex flex-col overflow-hidden theme">
-      <IdContext.Provider value={{ gistId, setGistId, version, setVersion }}>
+      <IdContext.Provider
+        value={{ gistId, setGistId, version, setVersion, role }}
+      >
         <ControlPanel
           title={title}
           setTitle={setTitle}
@@ -420,6 +463,11 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
                   {t("collaboration_participants", {
                     count: participants.length,
                   })}
+                </span>
+              )}
+              {!canEdit(role) && (
+                <span className="rounded-full bg-amber-100 px-2 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200">
+                  {t(role === "none" ? "no_access" : "read_only")}
                 </span>
               )}
             </div>
@@ -518,7 +566,10 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
         okText={t("continue")}
         cancelText={t("cancel")}
         onOk={() => {
-          setLayout((prev) => ({ ...prev, readOnly: false }));
+          setLayout((prev) => ({
+            ...prev,
+            readOnly: !canEdit(roleRef.current),
+          }));
           setShowRestoreModal(false);
           setVersion(null);
         }}

@@ -3,7 +3,9 @@ import {
   Image,
   Input,
   Modal as SemiUIModal,
+  Select,
   Spin,
+  Toast,
 } from "@douyinfe/semi-ui";
 import { saveAs } from "file-saver";
 import { useEffect, useState } from "react";
@@ -48,12 +50,18 @@ import {
   PROTO_OPTION_DEFS,
 } from "../../../utils/exportAs/protobuf";
 import {
+  defaultMigrationOptions,
   defaultSqlOptions,
   formatIssue,
+  generateMigration,
   generateSQL,
+  migrationOptionDefsFor,
   sqlOptionDefsFor,
 } from "../../../utils/exportSQL";
-import { saveExportOptions } from "../../../utils/exportPreferences";
+import {
+  loadExportOptions,
+  saveExportOptions,
+} from "../../../utils/exportPreferences";
 import { mergeCustomTypes } from "../../../utils/customTypes";
 
 const extensionToLanguage = {
@@ -130,7 +138,9 @@ export default function Modal({
       setTypes(importData.types);
     }
     if (importData.customTypes) {
-      mergeCustomTypes(importData.customTypes);
+      mergeCustomTypes(importData.customTypes).catch((error) =>
+        Toast.error(error.message || t("custom_types_save_failed")),
+      );
     }
   };
 
@@ -301,9 +311,30 @@ export default function Modal({
   };
 
   const hasExportSettings = Boolean(
-    (exportData.extension === "sql" && exportData.sqlSource) ||
-      (exportData.extension === "proto" && exportData.protoSource),
+    (exportData.extension === "sql" &&
+      (exportData.sqlSource || exportData.migrationSource)) ||
+      (exportData.extension === "proto" && exportData.protoSource) ||
+      (exportData.extension === "cpp" && exportData.cppSource),
   );
+
+  // Rebuilds the migration script for a dialect and settings.
+  const rebuildMigration = (dialect, migrationOptions) =>
+    setExportData((prev) => {
+      const { before, after, from, to } = prev.migrationSource;
+      const { sql, issues } = generateMigration(before, after, {
+        dialect,
+        options: migrationOptions,
+        from,
+        to,
+      });
+      return {
+        ...prev,
+        data: sql,
+        migrationDialect: dialect,
+        migrationOptions,
+        migrationIssues: issues,
+      };
+    });
 
   const getModalBody = () => {
     switch (modal) {
@@ -392,6 +423,61 @@ export default function Modal({
                             sqlIssues: issues,
                           };
                         });
+                      }}
+                    />
+                  </>
+                )}
+              {modal === MODAL.CODE &&
+                exportData.extension === "sql" &&
+                exportData.migrationSource && (
+                  <>
+                    {exportData.migrationSource.after.database ===
+                      DB.GENERIC && (
+                      <div className="flex items-center justify-between gap-4 py-1.5 px-1">
+                        <span className="text-sm">{t("database")}</span>
+                        <Select
+                          size="small"
+                          className="w-56"
+                          value={exportData.migrationDialect}
+                          optionList={Object.values(DB)
+                            .filter((db) => db !== DB.GENERIC)
+                            .map((db) => ({
+                              value: db,
+                              label: databases[db].name,
+                            }))}
+                          onChange={(dialect) =>
+                            rebuildMigration(
+                              dialect,
+                              loadExportOptions(`migration.${dialect}`),
+                            )
+                          }
+                        />
+                      </div>
+                    )}
+                    <ExportIssues
+                      issues={exportData.migrationIssues}
+                      prefix="sql_issue"
+                      format={formatIssue}
+                    />
+                    <ExportOptions
+                      prefix="sql_opt"
+                      defs={migrationOptionDefsFor(
+                        exportData.migrationDialect,
+                        exportData.migrationSource.after.database,
+                      )}
+                      values={{
+                        ...defaultMigrationOptions(exportData.migrationDialect),
+                        ...exportData.migrationOptions,
+                      }}
+                      onChange={(migrationOptions) => {
+                        saveExportOptions(
+                          `migration.${exportData.migrationDialect}`,
+                          migrationOptions,
+                        );
+                        rebuildMigration(
+                          exportData.migrationDialect,
+                          migrationOptions,
+                        );
                       }}
                     />
                   </>

@@ -35,6 +35,7 @@ import {
   useSelect,
   useUndoRedo,
   useCollab,
+  useCustomTypesVersion,
 } from "../../hooks";
 import TableInfo from "../EditorSidePanel/TablesTab/TableInfo";
 import { useTranslation } from "react-i18next";
@@ -71,6 +72,8 @@ export default function Table({
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const { settings } = useSettings();
   const { t } = useTranslation();
+  // Re-render when the shared custom types change.
+  useCustomTypesVersion();
   const {
     selectedElement,
     setSelectedElement,

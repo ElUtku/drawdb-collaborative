@@ -31,3 +31,10 @@ export function generateSQL(diagram, { dialect, options } = {}) {
 export function exportSQL(diagram, options) {
   return generateSQL(diagram, { options }).sql;
 }
+
+export { generateMigration } from "./migration";
+export {
+  defaultMigrationOptions,
+  migrationOptionDefsFor,
+  normalizeMigrationOptions,
+} from "./options";
