@@ -634,6 +634,8 @@ const en = {
     access_now_viewer: "You can now only view this diagram.",
     access_now_editor: "You can edit this diagram now.",
     delete_field: "Delete field",
+    deleted_objects_one: "{{count}} object deleted",
+    deleted_objects_other: "{{count}} objects deleted",
     delete_table_item: "Delete table",
     reset_route: "Reset line route",
     drag_to_move_line: "Drag to move the line",

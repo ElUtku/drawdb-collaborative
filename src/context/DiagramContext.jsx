@@ -99,6 +99,7 @@ export default function DiagramContextProvider({ children }) {
   };
 
   const deleteTable = (id, addToHistory = true) => {
+    if (!tables.some((t) => t.id === id)) return;
     if (shouldEmit() && isTableLockedByOther(id)) {
       Toast.warning(
         t("collaboration_table_lock_denied", {

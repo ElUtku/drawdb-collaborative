@@ -769,6 +769,20 @@ await shot(bob.page, "09-imported-dump");
       return { x: screen.x, y: screen.y };
     }, line);
   const menuItems = () => page.getByRole("menuitem").allInnerTexts();
+  // A point of the canvas with nothing on it.
+  const emptySpot = () =>
+    page.evaluate(() => {
+      const canvas = document.getElementById("diagram").getBoundingClientRect();
+      for (let y = canvas.top + 60; y < canvas.bottom - 120; y += 40) {
+        for (let x = canvas.left + 60; x < canvas.right - 60; x += 40) {
+          const hit = document.elementFromPoint(x, y);
+          if (hit?.closest("#diagram") && !hit.closest("[data-ctx-type]")) {
+            return { x, y };
+          }
+        }
+      }
+      return null;
+    });
   const dialog = page.getByRole("dialog");
 
   let point = await middle();
@@ -819,13 +833,22 @@ await shot(bob.page, "09-imported-dump");
   );
 
   // Right-drag pans the canvas and opens no menu; a right click does.
-  await page.mouse.move(560, 450);
+  let free = await emptySpot();
+  await page.mouse.move(free.x, free.y);
   await page.mouse.down({ button: "right" });
-  await page.mouse.move(470, 400, { steps: 8 });
+  await page.mouse.move(free.x + 90, free.y + 50, { steps: 8 });
+  await page.mouse.up({ button: "right" });
+  await page.waitForTimeout(200);
+  // And back, so the view is where the next steps expect it.
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(free.x, free.y, { steps: 8 });
   await page.mouse.up({ button: "right" });
   await page.waitForTimeout(400);
-  const menusAfterPan = await page.getByRole("menuitem").count();
-  await page.mouse.click(560, 450, { button: "right" });
+  const menusAfterPan = await page
+    .getByRole("menuitem", { name: "Add note" })
+    .count();
+  free = await emptySpot();
+  await page.mouse.click(free.x, free.y, { button: "right" });
   await page.waitForTimeout(500);
   const canvasMenu = await menuItems();
   await shot(page, "13-canvas-menu");
@@ -885,6 +908,7 @@ await shot(bob.page, "09-imported-dump");
 
   // Backspace works like Delete, and nothing is deleted once the canvas
   // was clicked (no selection left).
+  const spot = await emptySpot();
   await page.mouse.move(tableBox.x + 40, tableBox.y + 25);
   await page.mouse.down();
   await page.waitForTimeout(150);
@@ -895,13 +919,114 @@ await shot(bob.page, "09-imported-dump");
   const asked = await page.getByTestId("delete-dependencies").isVisible();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(800);
-  await page.mouse.click(560, 450);
+  await page.mouse.click(spot.x, spot.y);
   await page.waitForTimeout(300);
   await page.keyboard.press("Delete");
   await settle();
   check(
     "Backspace asks before deleting a linked table; Delete after clicking the canvas does nothing",
     asked && (await saved()).tables.length === 3,
+  );
+
+  // Keys typed in the side panel are not canvas shortcuts.
+  await page.mouse.move(tableBox.x + 40, tableBox.y + 25);
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Add table", exact: true }).focus();
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(600);
+  const askedFromPanel = await page
+    .getByTestId("delete-dependencies")
+    .isVisible()
+    .catch(() => false);
+  // Ctrl+X cuts what Ctrl+C copies, never a relationship.
+  point = await middle();
+  await page.mouse.click(point.x, point.y);
+  await page.keyboard.press("Control+x");
+  await settle();
+  check(
+    "Delete/Backspace with the focus outside the canvas and Ctrl+X on a relationship delete nothing",
+    !askedFromPanel && (await saved()).references.length === 1,
+  );
+
+  // A rubber-band selection: one question, one undo step, and pressing
+  // Delete again afterwards is harmless.
+  // Everything in view first (Fit window), then a box around customers and
+  // orders, starting from a corner with nothing on it.
+  await page.keyboard.press("Control+Alt+w");
+  await page.waitForTimeout(800);
+  const band = await page.evaluate(() => {
+    const rects = ["k1", "k2"].map((id) =>
+      document
+        .querySelector(`foreignObject[data-ctx-id="${id}"]`)
+        .getBoundingClientRect(),
+    );
+    const left = Math.min(...rects.map((r) => r.left)) - 30;
+    const top = Math.min(...rects.map((r) => r.top)) - 30;
+    const right = Math.min(
+      Math.max(...rects.map((r) => r.right)) + 30,
+      window.innerWidth - 4,
+    );
+    const bottom = Math.min(
+      Math.max(...rects.map((r) => r.bottom)) + 30,
+      window.innerHeight - 4,
+    );
+    const free = ([x, y]) => {
+      const hit = document.elementFromPoint(x, y);
+      return hit?.closest("#diagram") && !hit.closest("[data-ctx-type]");
+    };
+    const corners = [
+      [
+        [left, top],
+        [right, bottom],
+      ],
+      [
+        [right, bottom],
+        [left, top],
+      ],
+      [
+        [left, bottom],
+        [right, top],
+      ],
+      [
+        [right, top],
+        [left, bottom],
+      ],
+    ];
+    return corners.find(([corner]) => free(corner)) ?? corners[0];
+  });
+  await page.mouse.move(...band[0]);
+  await page.mouse.down();
+  await page.mouse.move(...band[1], { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(600);
+  const bulkAsked = await page.getByTestId("delete-dependencies").isVisible();
+  await dialog.getByRole("button", { name: "confirm" }).click();
+  await settle();
+  const emptied = !(await saved()).tables.some((tb) =>
+    ["k1", "k2"].includes(tb.id),
+  );
+  await page.keyboard.press("Delete");
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(800);
+  const editorAlive = await page
+    .getByRole("button", { name: "Add table", exact: true })
+    .isVisible();
+  await page.keyboard.press("Control+z");
+  await settle();
+  doc = await saved();
+  check(
+    "a rubber-band deletion asks once, undoes in one step, and a second Delete is harmless",
+    bulkAsked &&
+      emptied &&
+      editorAlive &&
+      ["k1", "k2"].every((id) => doc.tables.some((tb) => tb.id === id)) &&
+      doc.references.length === 1,
+    `asked ${bulkAsked}, emptied ${emptied}, alive ${editorAlive}, restored ${doc.tables.length}/${doc.references.length}`,
   );
 }
 

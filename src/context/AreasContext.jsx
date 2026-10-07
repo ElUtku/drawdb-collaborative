@@ -45,6 +45,8 @@ export default function AreasContextProvider({ children }) {
         {
           action: Action.ADD,
           element: ObjectType.AREA,
+          // Redo puts it back where it was created.
+          data: created,
           message: t("add_area"),
         },
       ]);
@@ -61,6 +63,7 @@ export default function AreasContextProvider({ children }) {
   };
 
   const deleteArea = (id, addToHistory = true) => {
+    if (!areas[id]) return;
     if (addToHistory) {
       Toast.success(t("area_deleted"));
       setUndoStack((prev) => [

@@ -124,7 +124,7 @@ export function CanvasContextProvider({ children, ...attrs }) {
    * @param {PointerEvent} e
    */
   function detectPointerMovement(e) {
-    const targetElm = /** @type {HTMLElement | null} */ (e.currentTarget);
+    const targetElm = canvasWrapRef.current;
     if (!e.isPrimary || !targetElm) return;
 
     const canvasBounds = targetElm.getBoundingClientRect();
@@ -140,6 +140,14 @@ export function CanvasContextProvider({ children, ...attrs }) {
   useEventListener("pointerdown", detectPointerMovement, canvasWrapRef);
 
   useEventListener("pointermove", detectPointerMovement, canvasWrapRef);
+
+  // While a button is held (dragging, panning, a selection box), the pointer
+  // may pass over a popover or leave the canvas: keep following it.
+  useEventListener("pointermove", (e) => {
+    if (e.buttons && !canvasWrapRef.current?.contains(e.target)) {
+      detectPointerMovement(e);
+    }
+  });
 
   const contextValue = {
     canvas: {

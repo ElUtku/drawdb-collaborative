@@ -90,7 +90,9 @@ export default function Canvas() {
   // Right click: the menu opens on release, unless the press panned.
   const [contextMenu, setContextMenu] = useState(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
-  const rightDownRef = useRef(false);
+  const rightDownRef = useRef(null);
+  // Each press, so a lock granted late knows whether it is still current.
+  const pressRef = useRef(0);
   const pendingMenuRef = useRef(null);
   const pointerDownActiveRef = useRef(false);
   const dragLockIdsRef = useRef([]);
@@ -151,8 +153,8 @@ export default function Canvas() {
     return el1.id === el2.id && el1.type === el2.type;
   };
 
-  const collectSelectedElements = () => {
-    const rect = getRectFromEndpoints(bulkSelectRect);
+  const collectSelectedElements = (box = bulkSelectRect) => {
+    const rect = getRectFromEndpoints(box);
     const elements = [];
     const shouldAddElement = (elementRect, element) => {
       // if ctrl key is pressed, only add the elements that are not already selected
@@ -254,8 +256,11 @@ export default function Canvas() {
       const relationship = relationships.find((r) => String(r.id) === raw);
       return relationship ? { element, id: relationship.id } : null;
     }
-    // Notes and areas are numbered by position.
-    return { element, id: Number(raw) };
+    // Notes and areas are numbered by position: the object itself tells
+    // whether the number still means the same one.
+    const id = Number(raw);
+    const object = (element === ObjectType.NOTE ? notes : areas)[id];
+    return object ? { element, id, object } : null;
   };
 
   const menuRequest = (e) => {
@@ -511,8 +516,12 @@ export default function Canvas() {
    */
   const handlePointerDown = async (e) => {
     if (!e.isPrimary) return;
+    // Side sheets and popovers of canvas objects are portals: their events
+    // bubble here through React, but they are not clicks on the canvas.
+    if (!e.currentTarget.contains(e.target)) return;
+    const press = ++pressRef.current;
     if (e.button === 2) {
-      rightDownRef.current = true;
+      rightDownRef.current = { x: e.clientX, y: e.clientY };
       pendingMenuRef.current = null;
     }
 
@@ -533,7 +542,11 @@ export default function Canvas() {
       const pointerDownElement = elementPointerDown;
       // A click on the empty canvas leaves nothing selected (so Delete has
       // nothing to delete).
-      if (pointerDownElement === null && !e.ctrlKey && !e.metaKey) {
+      const onEmptyCanvas =
+        pointerDownElement === null && !e.target.closest?.("[data-ctx-type]");
+      if (onEmptyCanvas && !e.ctrlKey && !e.metaKey) {
+        // An open note or area editor closes too: save what it changed.
+        if (selectedElement.open) setSaveState(State.SAVING);
         setSelectedElement((prev) =>
           prev.element === ObjectType.NONE
             ? prev
@@ -584,14 +597,20 @@ export default function Canvas() {
           }
           if (!pointerDownActiveRef.current) {
             releaseTableLocks(tableIds);
-            // Released before the lock came: a click, which still selects.
-            if (!e.ctrlKey && !e.metaKey) {
-              setSelectedElement((prev) => ({
-                ...prev,
-                element: ObjectType.TABLE,
-                id: clickedTableId,
-                open: false,
-              }));
+            // Released before the lock came: a click, which still selects,
+            // unless something else was clicked since (or a double-click
+            // already opened this table's editor).
+            if (!e.ctrlKey && !e.metaKey && press === pressRef.current) {
+              setSelectedElement((prev) =>
+                prev.element === ObjectType.TABLE && prev.id === clickedTableId
+                  ? prev
+                  : {
+                      ...prev,
+                      element: ObjectType.TABLE,
+                      id: clickedTableId,
+                      open: false,
+                    },
+              );
             }
             return;
           }
@@ -645,15 +664,18 @@ export default function Canvas() {
    * @param {PointerEvent} e
    */
   const handlePointerUp = (e) => {
+    handledPointerUp.current = e.nativeEvent ?? e;
     if (!e.isPrimary) return;
     pointerDownActiveRef.current = false;
-    if (e.button === 2) {
-      rightDownRef.current = false;
+    if (e.button === 2 && rightDownRef.current) {
+      // A few pixels of movement are still a click, not a pan.
+      const start = rightDownRef.current;
+      const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4;
+      rightDownRef.current = null;
+      rightClickPanned.current = moved;
       const pending = pendingMenuRef.current;
       pendingMenuRef.current = null;
-      if (pending && !(panning.isPanning && didPan())) {
-        openContextMenu(pending);
-      }
+      if (pending && !moved) openContextMenu(pending);
     }
     if (selectedElement.open && !layout.sidebar) return;
 
@@ -682,14 +704,15 @@ export default function Canvas() {
     }
 
     if (bulkSelectRect.show) {
-      setBulkSelectRect((prev) => ({
-        ...prev,
+      // The box as it is at release (the drawn one may be a move behind).
+      const box = {
+        ...bulkSelectRect,
         x2: pointer.spaces.diagram.x,
         y2: pointer.spaces.diagram.y,
-        show: false,
-      }));
+      };
+      setBulkSelectRect({ ...box, show: false });
       if (!isDragging()) {
-        collectSelectedElements();
+        collectSelectedElements(box);
       }
     }
     setDragging(notDragging);
@@ -701,7 +724,6 @@ export default function Canvas() {
 
     if (panning.isPanning && didPan()) {
       setSaveState(State.SAVING);
-      if (e.button === 2) rightClickPanned.current = true;
     }
     setPanning((old) => ({ ...old, isPanning: false }));
     pointer.setStyle("default");
@@ -816,6 +838,22 @@ export default function Canvas() {
     addRelationship(newRelationship);
   };
 
+  // A button released outside the canvas (over the side panel, or outside
+  // the window) still ends what it started: a pan, a drag, a selection box,
+  // a pending right-click menu.
+  const handledPointerUp = useRef(null);
+  useEventListener("pointerup", (e) => {
+    if (handledPointerUp.current === e) return;
+    const busy =
+      panning.isPanning ||
+      bulkSelectRect.show ||
+      isDragging() ||
+      linking ||
+      areaResize.id !== -1 ||
+      rightDownRef.current;
+    if (busy) handlePointerUp(e);
+  });
+
   useEventListener(
     "wheel",
     (e) => {
@@ -879,6 +917,8 @@ export default function Canvas() {
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
           onContextMenu={(e) => {
+            // In a side sheet or popover (a portal): the browser's own menu.
+            if (!e.currentTarget.contains(e.target)) return;
             e.preventDefault();
             // Linux and macOS send this on press: wait for the release.
             if (rightDownRef.current) {

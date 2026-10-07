@@ -50,6 +50,8 @@ export default function NotesContextProvider({ children }) {
         {
           action: Action.ADD,
           element: ObjectType.NOTE,
+          // Redo puts it back where it was created.
+          data: created,
           message: t("add_note"),
         },
       ]);
@@ -66,6 +68,7 @@ export default function NotesContextProvider({ children }) {
   };
 
   const deleteNote = (id, addToHistory = true) => {
+    if (!notes[id]) return;
     if (addToHistory) {
       Toast.success(t("note_deleted"));
       setUndoStack((prev) => [

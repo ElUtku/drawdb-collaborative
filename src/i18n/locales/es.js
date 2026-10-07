@@ -769,6 +769,8 @@ const es = {
     access_now_viewer: "Ahora solo puedes ver este diagrama.",
     access_now_editor: "Ya puedes editar este diagrama.",
     delete_field: "Eliminar campo",
+    deleted_objects_one: "{{count}} objeto eliminado",
+    deleted_objects_other: "{{count}} objetos eliminados",
     delete_table_item: "Eliminar tabla",
     reset_route: "Restablecer trazado de la línea",
     drag_to_move_line: "Arrastra para mover la línea",

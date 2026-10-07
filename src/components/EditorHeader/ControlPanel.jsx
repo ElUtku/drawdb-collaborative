@@ -220,6 +220,25 @@ export default function ControlPanel({
     const a = undoStack[undoStack.length - 1];
     setUndoStack((prev) => prev.filter((_, i) => i !== prev.length - 1));
 
+    // Several objects deleted at once: back in their original places.
+    if (a.action === Action.DELETE && a.deleted) {
+      const of = (element) => a.deleted.filter((d) => d.element === element);
+      of(ObjectType.TABLE)
+        .sort((x, y) => x.data.index - y.data.index)
+        .forEach(({ data }) => {
+          data.relationship.forEach((r) => addRelationship(r, false));
+          addTable(data, false);
+        });
+      of(ObjectType.NOTE)
+        .sort((x, y) => x.data.id - y.data.id)
+        .forEach(({ data }) => addNote(data, false));
+      of(ObjectType.AREA)
+        .sort((x, y) => x.data.id - y.data.id)
+        .forEach(({ data }) => addArea(data, false));
+      setRedoStack((prev) => [...prev, a]);
+      return;
+    }
+
     if (a.bulk) {
       for (const element of a.elements) {
         if (element.type === ObjectType.TABLE) {
@@ -420,6 +439,25 @@ export default function ControlPanel({
     const a = redoStack[redoStack.length - 1];
     setRedoStack((prev) => prev.filter((e, i) => i !== prev.length - 1));
 
+    if (a.action === Action.DELETE && a.deleted) {
+      const ids = (element) =>
+        a.deleted
+          .filter((d) => d.element === element)
+          .map((d) =>
+            element === ObjectType.TABLE ? d.data.table.id : d.data.id,
+          );
+      ids(ObjectType.TABLE).forEach((id) => deleteTable(id, false));
+      // Numbered by position: the last ones first.
+      ids(ObjectType.NOTE)
+        .sort((x, y) => y - x)
+        .forEach((id) => deleteNote(id, false));
+      ids(ObjectType.AREA)
+        .sort((x, y) => y - x)
+        .forEach((id) => deleteArea(id, false));
+      setUndoStack((prev) => [...prev, a]);
+      return;
+    }
+
     if (a.bulk) {
       for (const element of a.elements) {
         if (element.type === ObjectType.TABLE) {
@@ -438,9 +476,9 @@ export default function ControlPanel({
       if (a.element === ObjectType.TABLE) {
         addTable(a.data, false);
       } else if (a.element === ObjectType.AREA) {
-        addArea(null, false);
+        addArea(a.data ?? null, false);
       } else if (a.element === ObjectType.NOTE) {
-        addNote(null, false);
+        addNote(a.data ?? null, false);
       } else if (a.element === ObjectType.RELATIONSHIP) {
         addRelationship(a.data, false);
       } else if (a.element === ObjectType.TYPE) {
@@ -772,11 +810,21 @@ export default function ControlPanel({
     [...document.querySelectorAll(".semi-modal, .semi-sidesheet-inner")].some(
       (el) => el.getClientRects().length > 0,
     );
+  // Delete, Backspace and Ctrl+X act on the canvas only while it has the
+  // keyboard: not while a side panel control, a menu or a dialog has it.
+  const canvasHasFocus = () => {
+    const el = document.activeElement;
+    return (
+      (!el || el === document.body || Boolean(el.closest?.("#canvas"))) &&
+      !dialogOpen()
+    );
+  };
   const del = () => {
     if (layout.readOnly || dialogOpen()) {
       return;
     }
-    if (bulkSelectedElements.length > 1) {
+    // What is highlighted: the rubber-band selection, or the one object.
+    if (bulkSelectedElements.length > 0) {
       elementActions.removeMany(bulkSelectedElements);
       return;
     }
@@ -790,12 +838,12 @@ export default function ControlPanel({
   };
   const copy = () => elementActions.copy(selectedElement);
   const paste = () => elementActions.paste();
+  // Cuts what copy copies: one table, note or area.
   const cut = () => {
-    if (layout.readOnly) {
+    if (layout.readOnly || bulkSelectedElements.length > 1) {
       return;
     }
-    copy();
-    del();
+    elementActions.cut(selectedElement);
   };
   const toggleDBMLEditor = () => {
     setLayout((prev) => ({ ...prev, dbmlEditor: !prev.dbmlEditor }));
@@ -1626,8 +1674,11 @@ export default function ControlPanel({
   useHotkeys("mod+d", duplicate, { preventDefault: true });
   useHotkeys("mod+c", copy, { preventDefault: true });
   useHotkeys("mod+v", paste, { preventDefault: true });
-  useHotkeys("mod+x", cut, { preventDefault: true });
-  useHotkeys("delete, backspace", del, { preventDefault: true });
+  useHotkeys("mod+x", cut, { preventDefault: true, enabled: canvasHasFocus });
+  useHotkeys("delete, backspace", del, {
+    preventDefault: true,
+    enabled: canvasHasFocus,
+  });
   useHotkeys("mod+shift+g", viewGrid, { preventDefault: true });
   useHotkeys("mod+up", zoomIn, { preventDefault: true });
   useHotkeys("mod+down", zoomOut, { preventDefault: true });

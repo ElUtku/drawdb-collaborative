@@ -17,6 +17,11 @@ import useNotes from "./useNotes";
 import useSelect from "./useSelect";
 import useUndoRedo from "./useUndoRedo";
 
+// The actions as of the latest render. A confirmation dialog can stay open
+// while the diagram changes (other people edit it too), so what it runs
+// when confirmed is looked up then, not when it was opened.
+const latest = { current: null };
+
 export default function useElementActions() {
   const { t } = useTranslation();
   const { layout } = useLayout();
@@ -31,7 +36,8 @@ export default function useElementActions() {
   } = useDiagram();
   const { notes, addNote, deleteNote } = useNotes();
   const { areas, addArea, deleteArea } = useAreas();
-  const { selectedElement, setSelectedElement } = useSelect();
+  const { selectedElement, setSelectedElement, setBulkSelectedElements } =
+    useSelect();
   const { setUndoStack, setRedoStack } = useUndoRedo();
 
   const byId = (list, id) => list.find((item) => item.id === id);
@@ -92,6 +98,10 @@ export default function useElementActions() {
     });
   };
 
+  // Whatever is deleted leaves the selection (notes and areas are renumbered,
+  // so a stale entry would point at another object).
+  const clearSelection = () => setBulkSelectedElements([]);
+
   // `run` wraps the deletion (the canvas takes the collaboration lock first).
   const removeTable = (tableId, { run = (action) => action() } = {}) => {
     if (layout.readOnly) return;
@@ -100,7 +110,11 @@ export default function useElementActions() {
     confirmIfNeeded(
       t("delete_table_confirm", { name: table.name }),
       tableDependencies(tableId),
-      () => run(() => deleteTable(tableId)),
+      () =>
+        run(() => {
+          latest.current.deleteTable(tableId);
+          latest.current.clearSelection();
+        }),
     );
   };
 
@@ -109,7 +123,14 @@ export default function useElementActions() {
     confirmIfNeeded(
       t("delete_field_confirm", { name: field.name }),
       fieldDependencies(field, tableId),
-      () => run(() => deleteField(field, tableId)),
+      () =>
+        run(() => {
+          // The column as it is now, if it is still there.
+          const current = latest.current.tables
+            .find((tb) => tb.id === tableId)
+            ?.fields.find((f) => f.id === field.id);
+          if (current) latest.current.deleteField(current, tableId);
+        }),
     );
   };
 
@@ -124,44 +145,125 @@ export default function useElementActions() {
         break;
       case ObjectType.NOTE:
         if (notes[id]) deleteNote(id);
+        clearSelection();
         break;
       case ObjectType.AREA:
         if (areas[id]) deleteArea(id);
+        clearSelection();
         break;
       default:
         break;
     }
   };
 
-  /** Deletes several objects (a rubber-band selection) after one question. */
+  /**
+   * Deletes several objects (a rubber-band selection) after one question,
+   * as one step to undo.
+   */
   const removeMany = (elements) => {
-    if (layout.readOnly || !elements.length) return;
-    if (elements.length === 1) {
-      remove({ element: elements[0].type, id: elements[0].id });
+    if (layout.readOnly) return;
+    // Only what still exists (the selection may predate other deletions).
+    const present = elements.filter((el) =>
+      el.type === ObjectType.TABLE
+        ? byId(tables, el.id)
+        : el.type === ObjectType.NOTE
+          ? notes[el.id]
+          : el.type === ObjectType.AREA
+            ? areas[el.id]
+            : false,
+    );
+    if (!present.length) {
+      clearSelection();
       return;
     }
-    const tableIds = elements
-      .filter((el) => el.type === ObjectType.TABLE)
-      .map((el) => el.id);
+    if (present.length === 1) {
+      remove({ element: present[0].type, id: present[0].id });
+      return;
+    }
+    const ids = (type) =>
+      present.filter((el) => el.type === type).map((el) => el.id);
+    const tableIds = ids(ObjectType.TABLE);
     const dependencies = relationships.filter(
       (r) =>
         tableIds.includes(r.startTableId) || tableIds.includes(r.endTableId),
     );
-    // Notes and areas are numbered by position: the last ones go first.
-    const descending = (type) =>
-      elements
-        .filter((el) => el.type === type)
-        .map((el) => el.id)
-        .sort((a, b) => b - a);
     confirmIfNeeded(
-      t("delete_selection_confirm", { count: elements.length }),
+      t("delete_selection_confirm", { count: present.length }),
       dependencies,
-      () => {
-        tableIds.forEach((id) => deleteTable(id));
-        descending(ObjectType.NOTE).forEach((id) => deleteNote(id));
-        descending(ObjectType.AREA).forEach((id) => deleteArea(id));
-      },
+      () =>
+        latest.current.deleteNow(
+          tableIds,
+          ids(ObjectType.NOTE),
+          ids(ObjectType.AREA),
+        ),
     );
+  };
+
+  // The deletion itself, with one undo entry that restores everything.
+  const deleteNow = (tableIds, noteIds, areaIds) => {
+    const existing = tableIds.filter((id) => byId(tables, id));
+    const claimed = new Set();
+    const deleted = [];
+    for (const id of existing) {
+      // Each relationship is restored once, with the first of its tables.
+      const rels = relationships.filter(
+        (r) =>
+          (r.startTableId === id || r.endTableId === id) && !claimed.has(r.id),
+      );
+      rels.forEach((r) => claimed.add(r.id));
+      deleted.push({
+        element: ObjectType.TABLE,
+        data: {
+          table: byId(tables, id),
+          relationship: rels,
+          index: tables.findIndex((tb) => tb.id === id),
+        },
+      });
+    }
+    const notesGone = noteIds.filter((id) => notes[id]).sort((a, b) => b - a);
+    const areasGone = areaIds.filter((id) => areas[id]).sort((a, b) => b - a);
+    notesGone.forEach((id) =>
+      deleted.push({ element: ObjectType.NOTE, data: notes[id] }),
+    );
+    areasGone.forEach((id) =>
+      deleted.push({ element: ObjectType.AREA, data: areas[id] }),
+    );
+    if (!deleted.length) return;
+    existing.forEach((id) => deleteTable(id, false));
+    notesGone.forEach((id) => deleteNote(id, false));
+    areasGone.forEach((id) => deleteArea(id, false));
+    setUndoStack((prev) => [
+      ...prev,
+      {
+        action: Action.DELETE,
+        element: ObjectType.NONE,
+        deleted,
+        message: t("delete_selection_confirm", { count: deleted.length }),
+      },
+    ]);
+    setRedoStack([]);
+    clearSelection();
+    setSelectedElement((prev) => ({
+      ...prev,
+      element: ObjectType.NONE,
+      id: -1,
+      open: false,
+    }));
+    Toast.success(t("deleted_objects", { count: deleted.length }));
+  };
+
+  /** Ctrl+X: cuts what Ctrl+C copies (one table, note or area). */
+  const cut = (target) => {
+    if (layout.readOnly) return;
+    if (
+      ![ObjectType.TABLE, ObjectType.NOTE, ObjectType.AREA].includes(
+        target.element,
+      )
+    ) {
+      return;
+    }
+    copy(target);
+    remove(target);
   };
 
   const edit = ({ element, id }) => {
@@ -307,7 +409,16 @@ export default function useElementActions() {
     updateRelationship(id, { bendOffset: null });
   };
 
+  latest.current = {
+    tables,
+    deleteTable,
+    deleteField,
+    deleteNow,
+    clearSelection,
+  };
+
   return {
+    cut,
     tableDependencies,
     fieldDependencies,
     removeTable,

@@ -154,7 +154,86 @@ export function fieldAnchorY(table, index, tableWidth, showComments = true) {
 export function relationshipBendX(relationship, startTable, endTable, width) {
   const offset = relationship?.bendOffset;
   if (!Number.isFinite(offset)) return null;
-  return bendOrigin(startTable, endTable, width) + offset;
+  return clampBend(
+    bendOrigin(startTable, endTable, width) + offset,
+    startTable,
+    endTable,
+    width,
+  );
+}
+
+/**
+ * Keeps a vertical segment out from under the tables (they are drawn over
+ * the lines): a position over either table moves to the nearest side of it
+ * that is clear of both. Null when there is none (then the automatic route
+ * is used).
+ */
+export function clampBend(x, startTable, endTable, width, margin = 20) {
+  if (!Number.isFinite(x)) return null;
+  const spans = [startTable, endTable].map((t) => [t.x, t.x + width]);
+  const covered = (v) =>
+    spans.some(
+      ([left, right]) => v > left - margin / 2 && v < right + margin / 2,
+    );
+  if (!covered(x)) return x;
+  const clear = spans
+    .flatMap(([left, right]) => [left - margin, right + margin])
+    .filter((v) => !covered(v));
+  if (!clear.length) return null;
+  return clear.reduce((best, v) =>
+    Math.abs(v - x) < Math.abs(best - x) ? v : best,
+  );
+}
+
+/**
+ * Where the automatic route (calcPath without a bend) draws its vertical
+ * segment, and the middle of it: the place for the handle that moves it.
+ */
+export function defaultBend(
+  r,
+  tableWidth = 200,
+  zoom = 1,
+  showComments = true,
+) {
+  const width = tableWidth * zoom;
+  const x1 = r.startTable.x;
+  const x2 = r.endTable.x;
+  const y1 = fieldAnchorY(
+    r.startTable,
+    r.startFieldIndex,
+    tableWidth,
+    showComments,
+  );
+  const y2 = fieldAnchorY(
+    r.endTable,
+    r.endFieldIndex,
+    tableWidth,
+    showComments,
+  );
+  const y = (y1 + y2) / 2;
+  let radius = 10 * zoom;
+  const midX = (x2 + x1 + width) / 2;
+  if (Math.abs(y1 - y2) <= 36 * zoom) {
+    radius = Math.abs(y2 - y1) / 3;
+    if (radius <= 2) {
+      if (x1 + width <= x2) return { x: (x1 + width + x2) / 2, y };
+      if (x2 + width < x1) return { x: (x1 + x2 + width) / 2, y };
+    }
+  }
+  if (y1 <= y2) {
+    if (x1 + width <= x2) return { x: midX, y };
+    if (x2 <= x1 + width && x1 <= x2) return { x: x2 + width + radius, y };
+    if (x2 + width >= x1 && x2 + width <= x1 + width) {
+      return { x: x2 - 2 * radius, y };
+    }
+    return { x: midX, y };
+  }
+  if (x1 + width <= x2) return { x: midX, y };
+  if (x1 + width >= x2 && x1 + width <= x2 + width) {
+    return { x: x1 - 3 * radius, y };
+  }
+  if (x1 >= x2 && x1 <= x2 + width) return { x: x1 + width + 2 * radius, y };
+  return { x: midX, y };
 }
 
 export function bendOrigin(startTable, endTable, width) {

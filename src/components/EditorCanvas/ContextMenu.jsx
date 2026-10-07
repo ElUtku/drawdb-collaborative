@@ -36,10 +36,32 @@ export default function ContextMenu({ menu, onClose }) {
   const { areas, addArea } = useAreas();
   const actions = useElementActions();
 
+  // What the menu was opened on, if it is still there (notes and areas are
+  // renumbered when one is deleted: the same number may now be another one).
+  const target = menu?.target;
+  const stillThere =
+    !target ||
+    (target.element === ObjectType.TABLE
+      ? tables.some((tb) => tb.id === target.id)
+      : target.element === ObjectType.RELATIONSHIP
+        ? relationships.some((r) => r.id === target.id)
+        : (target.element === ObjectType.NOTE ? notes : areas)[target.id] ===
+          target.object);
+
+  useEffect(() => {
+    if (menu && !stillThere) onClose();
+  }, [menu, stillThere, onClose]);
+
   useEffect(() => {
     if (!menu) return;
+    // Escape closes it; so do the keys that delete what it is about.
     const close = (e) => {
-      if (e.type !== "keydown" || e.key === "Escape") onClose();
+      if (
+        e.type !== "keydown" ||
+        ["Escape", "Delete", "Backspace"].includes(e.key)
+      ) {
+        onClose();
+      }
     };
     window.addEventListener("keydown", close);
     window.addEventListener("resize", close);
@@ -51,7 +73,7 @@ export default function ContextMenu({ menu, onClose }) {
     };
   }, [menu, onClose]);
 
-  if (!menu) return null;
+  if (!menu || !stillThere) return null;
 
   const editable = !layout.readOnly;
   const item = (key, label, run, { icon, danger = false } = {}) => (
@@ -73,7 +95,6 @@ export default function ContextMenu({ menu, onClose }) {
     </Dropdown.Title>
   );
 
-  const target = menu.target;
   const items = [];
   // Edit, duplicate, copy and delete, for what has them.
   const common = (element, id, { duplicate = true } = {}) => {

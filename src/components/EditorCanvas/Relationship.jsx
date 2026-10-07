@@ -10,6 +10,8 @@ import {
   bendOrigin,
   calcPath,
   calcCompositePath,
+  clampBend,
+  defaultBend,
   fieldAnchorY,
   relationshipBendX,
 } from "../../utils/calcPath";
@@ -89,16 +91,22 @@ export default function Relationship({ data }) {
 
   const isComposite = (pathValues?.startFieldIndices?.length ?? 0) > 1;
 
-  const bendX =
-    dragBendX ??
-    (pathValues
-      ? relationshipBendX(
-          data,
+  // While dragging, the segment also stays clear of the tables.
+  const bendX = !pathValues
+    ? null
+    : dragBendX !== null
+      ? clampBend(
+          dragBendX,
           pathValues.startTable,
           pathValues.endTable,
           settings.tableWidth,
         )
-      : null);
+      : relationshipBendX(
+          data,
+          pathValues.startTable,
+          pathValues.endTable,
+          settings.tableWidth,
+        );
 
   const composite = useMemo(() => {
     if (!pathValues || !isComposite) return null;
@@ -215,9 +223,15 @@ export default function Relationship({ data }) {
           anchor(pathValues.endTable, pathValues.endFieldIndex)) /
         2,
     };
-  } else if (pathRef.current) {
-    const length = pathRef.current.getTotalLength();
-    handle = pathRef.current.getPointAtLength(length / 2);
+  } else if (pathValues) {
+    // Where the automatic route has its vertical segment, so the first
+    // movement continues from there.
+    handle = defaultBend(
+      pathValues,
+      settings.tableWidth,
+      1,
+      settings.showComments,
+    );
   }
 
   const select = () => {
@@ -245,12 +259,22 @@ export default function Relationship({ data }) {
     select();
     if (layout.readOnly || !handle) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { grab: diagramX(e) - handle.x, x: null };
+    dragRef.current = {
+      grab: diagramX(e) - handle.x,
+      startX: e.clientX,
+      moved: false,
+      x: null,
+    };
   };
 
   const drag = (e) => {
     if (!dragRef.current) return;
     e.stopPropagation();
+    // A click that wobbles a pixel or two is not a move.
+    if (!dragRef.current.moved) {
+      if (Math.abs(e.clientX - dragRef.current.startX) < 4) return;
+      dragRef.current.moved = true;
+    }
     let x = diagramX(e) - dragRef.current.grab;
     if (settings.snapToGrid) x = Math.round(x / gridSize) * gridSize;
     dragRef.current.x = x;
@@ -263,10 +287,17 @@ export default function Relationship({ data }) {
     setDragBendX(null);
     if (!state) return;
     e.stopPropagation();
-    if (state.x === null || !pathValues) return;
+    if (!state.moved || state.x === null || !pathValues) return;
+    const x = clampBend(
+      state.x,
+      pathValues.startTable,
+      pathValues.endTable,
+      settings.tableWidth,
+    );
+    if (x === null) return;
     const offset =
       Math.round(
-        (state.x -
+        (x -
           bendOrigin(
             pathValues.startTable,
             pathValues.endTable,
@@ -390,7 +421,10 @@ export default function Relationship({ data }) {
               dragRef.current = null;
               setDragBendX(null);
             }}
-            onDoubleClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              edit();
+            }}
           >
             <title>{t("drag_to_move_line")}</title>
           </circle>
