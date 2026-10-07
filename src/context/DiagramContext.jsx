@@ -68,6 +68,9 @@ export default function DiagramContextProvider({ children }) {
     };
     if (data) {
       setTables((prev) => {
+        // Restoring a table that is still there (its deletion was refused,
+        // say) must not make a second copy.
+        if (prev.some((t) => t.id === data.table.id)) return prev;
         const temp = prev.slice();
         temp.splice(data.index || tables.length, 0, data.table);
         return temp;

@@ -9,8 +9,9 @@ import { nanoid } from "nanoid";
 import { useTranslation } from "react-i18next";
 import { Action, ObjectType, Tab } from "../data/constants";
 import { areaSchema, noteSchema, tableSchema } from "../data/schemas";
-import { getRelationshipFields } from "../utils/utils";
+import { getRelationshipFields, sameNoteOrArea } from "../utils/utils";
 import useAreas from "./useAreas";
+import useCollab from "./useCollab";
 import useDiagram from "./useDiagram";
 import useLayout from "./useLayout";
 import useNotes from "./useNotes";
@@ -35,6 +36,7 @@ export default function useElementActions() {
     updateRelationship,
   } = useDiagram();
   const { notes, addNote, deleteNote } = useNotes();
+  const { isTableLockedByOther } = useCollab();
   const { areas, addArea, deleteArea } = useAreas();
   const { selectedElement, setSelectedElement, setBulkSelectedElements } =
     useSelect();
@@ -193,15 +195,22 @@ export default function useElementActions() {
       () =>
         latest.current.deleteNow(
           tableIds,
-          ids(ObjectType.NOTE),
-          ids(ObjectType.AREA),
+          // Notes and areas by content: their numbers may change while the
+          // question is open.
+          ids(ObjectType.NOTE).map((id) => notes[id]),
+          ids(ObjectType.AREA).map((id) => areas[id]),
         ),
     );
   };
 
   // The deletion itself, with one undo entry that restores everything.
-  const deleteNow = (tableIds, noteIds, areaIds) => {
-    const existing = tableIds.filter((id) => byId(tables, id));
+  const deleteNow = (tableIds, noteObjects, areaObjects) => {
+    // Tables someone else is editing stay (deleteTable would refuse them).
+    const locked = tableIds.filter((id) => isTableLockedByOther(id));
+    if (locked.length) Toast.warning(t("collaboration_table_lock_unavailable"));
+    const existing = tableIds.filter(
+      (id) => byId(tables, id) && !locked.includes(id),
+    );
     const claimed = new Set();
     const deleted = [];
     for (const id of existing) {
@@ -220,8 +229,16 @@ export default function useElementActions() {
         },
       });
     }
-    const notesGone = noteIds.filter((id) => notes[id]).sort((a, b) => b - a);
-    const areasGone = areaIds.filter((id) => areas[id]).sort((a, b) => b - a);
+    const positions = (list, objects) =>
+      [
+        ...new Set(
+          objects
+            .map((object) => list.findIndex((o) => sameNoteOrArea(o, object)))
+            .filter((index) => index !== -1),
+        ),
+      ].sort((a, b) => b - a);
+    const notesGone = positions(notes, noteObjects);
+    const areasGone = positions(areas, areaObjects);
     notesGone.forEach((id) =>
       deleted.push({ element: ObjectType.NOTE, data: notes[id] }),
     );

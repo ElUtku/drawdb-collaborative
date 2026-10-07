@@ -93,6 +93,8 @@ export default function Canvas() {
   const rightDownRef = useRef(null);
   // Each press, so a lock granted late knows whether it is still current.
   const pressRef = useRef(0);
+  // The tables the latest press is taking locks for.
+  const pressTablesRef = useRef([]);
   const pendingMenuRef = useRef(null);
   const pointerDownActiveRef = useRef(false);
   const dragLockIdsRef = useRef([]);
@@ -520,6 +522,9 @@ export default function Canvas() {
     // bubble here through React, but they are not clicks on the canvas.
     if (!e.currentTarget.contains(e.target)) return;
     const press = ++pressRef.current;
+    pressTablesRef.current = [];
+    // Follow the pointer even outside the canvas until this press ends.
+    pointer.followOutside.current = true;
     if (e.button === 2) {
       rightDownRef.current = { x: e.clientX, y: e.clientY };
       pendingMenuRef.current = null;
@@ -558,7 +563,10 @@ export default function Canvas() {
         y1: pointer.spaces.diagram.y,
         x2: pointer.spaces.diagram.x,
         y2: pointer.spaces.diagram.y,
-        show: elementPointerDown === null || !elementPointerDown.element.locked,
+        // Not from an area's resize handle or a relationship.
+        show:
+          onEmptyCanvas ||
+          (pointerDownElement !== null && !pointerDownElement.element.locked),
         ctrlKey: e.ctrlKey,
         metaKey: e.metaKey,
       });
@@ -591,8 +599,16 @@ export default function Canvas() {
                 .filter((item) => item.type === ObjectType.TABLE)
                 .map((item) => item.id)
             : [clickedTableId];
+          pressTablesRef.current = tableIds;
           if (!(await acquireTableLocks(tableIds))) {
             Toast.warning(t("collaboration_table_lock_unavailable"));
+            return;
+          }
+          // Another press started meanwhile: this one is over. Keep only the
+          // locks that press needs.
+          if (press !== pressRef.current) {
+            const needed = pressTablesRef.current;
+            releaseTableLocks(tableIds.filter((id) => !needed.includes(id)));
             return;
           }
           if (!pointerDownActiveRef.current) {
@@ -600,7 +616,7 @@ export default function Canvas() {
             // Released before the lock came: a click, which still selects,
             // unless something else was clicked since (or a double-click
             // already opened this table's editor).
-            if (!e.ctrlKey && !e.metaKey && press === pressRef.current) {
+            if (!e.ctrlKey && !e.metaKey) {
               setSelectedElement((prev) =>
                 prev.element === ObjectType.TABLE && prev.id === clickedTableId
                   ? prev
@@ -666,6 +682,8 @@ export default function Canvas() {
   const handlePointerUp = (e) => {
     handledPointerUp.current = e.nativeEvent ?? e;
     if (!e.isPrimary) return;
+    pointer.followOutside.current = false;
+    const releasedOnCanvas = Boolean(canvasRef.current?.contains(e.target));
     pointerDownActiveRef.current = false;
     if (e.button === 2 && rightDownRef.current) {
       // A few pixels of movement are still a click, not a pan.
@@ -704,14 +722,18 @@ export default function Canvas() {
     }
 
     if (bulkSelectRect.show) {
-      // The box as it is at release (the drawn one may be a move behind).
-      const box = {
-        ...bulkSelectRect,
-        x2: pointer.spaces.diagram.x,
-        y2: pointer.spaces.diagram.y,
-      };
+      // The box as it is at release (the drawn one may be a move behind);
+      // released outside the canvas, the box as drawn.
+      const box = releasedOnCanvas
+        ? {
+            ...bulkSelectRect,
+            x2: pointer.spaces.diagram.x,
+            y2: pointer.spaces.diagram.y,
+          }
+        : bulkSelectRect;
       setBulkSelectRect({ ...box, show: false });
-      if (!isDragging()) {
+      // Only a box the user drew (not a resize or a link) selects.
+      if (!isDragging() && !linking && areaResize.id === -1) {
         collectSelectedElements(box);
       }
     }
@@ -844,6 +866,7 @@ export default function Canvas() {
   const handledPointerUp = useRef(null);
   useEventListener("pointerup", (e) => {
     if (handledPointerUp.current === e) return;
+    pointer.followOutside.current = false;
     const busy =
       panning.isPanning ||
       bulkSelectRect.show ||

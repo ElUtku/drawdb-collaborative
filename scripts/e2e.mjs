@@ -1028,6 +1028,66 @@ await shot(bob.page, "09-imported-dump");
       doc.references.length === 1,
     `asked ${bulkAsked}, emptied ${emptied}, alive ${editorAlive}, restored ${doc.tables.length}/${doc.references.length}`,
   );
+
+  // Resizing an area by its corner selects nothing on the way.
+  {
+    const current = await api(page, "GET", `/api/diagrams/${id}`);
+    await api(page, "PUT", `/api/diagrams/${id}`, {
+      document: {
+        ...current.data.document,
+        areas: [
+          {
+            id: 0,
+            name: "zone",
+            x: -400,
+            y: -100,
+            width: 200,
+            height: 60,
+            color: "#175e7a",
+          },
+        ],
+      },
+      baseVersion: current.data.version,
+    });
+    await page.reload();
+    await page.waitForTimeout(2500);
+    await page.keyboard.press("Control+Alt+w");
+    await page.waitForTimeout(800);
+    const toScreen = (x, y) =>
+      page.evaluate(
+        ([px, py]) => {
+          const svg = document.getElementById("diagram");
+          const p = new DOMPoint(px, py).matrixTransform(svg.getScreenCTM());
+          return { x: p.x, y: p.y };
+        },
+        [x, y],
+      );
+    const inside = await toScreen(-300, -70);
+    const corner = await toScreen(-200, -40);
+    const target = await toScreen(260, 180);
+    await page.mouse.move(inside.x, inside.y);
+    await page.waitForTimeout(300);
+    await page.mouse.move(corner.x, corner.y);
+    await page.mouse.down();
+    await page.mouse.move(target.x, target.y, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    await page.keyboard.press("Delete");
+    await page.waitForTimeout(600);
+    // Had the table been swept into the selection, Delete would now ask
+    // about its relationship.
+    const swept = await page.getByTestId("delete-dependencies").isVisible();
+    if (swept) await page.keyboard.press("Escape");
+    await settle();
+    const after = await saved();
+    check(
+      "resizing an area over a table selects nothing, so Delete keeps the table",
+      !swept &&
+        after.tables.some((tb) => tb.id === "k1") &&
+        after.areas[0]?.width > 400,
+      `area ${JSON.stringify(after.areas[0] && { w: after.areas[0].width, h: after.areas[0].height })}`,
+    );
+  }
 }
 
 // --- 13. Admin: activity, backups, delete with transfer ------------------------------------------

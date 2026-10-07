@@ -141,10 +141,16 @@ export function CanvasContextProvider({ children, ...attrs }) {
 
   useEventListener("pointermove", detectPointerMovement, canvasWrapRef);
 
-  // While a button is held (dragging, panning, a selection box), the pointer
-  // may pass over a popover or leave the canvas: keep following it.
+  // During a canvas interaction (dragging, panning, a selection box) the
+  // pointer may pass over a popover or leave the canvas: keep following it.
+  // The canvas sets this from press to release.
+  const followOutsideRef = useRef(false);
   useEventListener("pointermove", (e) => {
-    if (e.buttons && !canvasWrapRef.current?.contains(e.target)) {
+    if (
+      followOutsideRef.current &&
+      e.buttons &&
+      !canvasWrapRef.current?.contains(e.target)
+    ) {
       detectPointerMovement(e);
     }
   });
@@ -166,6 +172,7 @@ export function CanvasContextProvider({ children, ...attrs }) {
       },
       style: pointerStyle,
       setStyle: setPointerStyle,
+      followOutside: followOutsideRef,
     },
   };
 

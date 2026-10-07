@@ -10,13 +10,21 @@ export default function AreasContextProvider({ children }) {
   const { t } = useTranslation();
   const [areas, setAreas] = useState([]);
   const { transform } = useTransform();
-  const { selectedElement, setSelectedElement } = useSelect();
+  const { selectedElement, setSelectedElement, setBulkSelectedElements } =
+    useSelect();
+  // Adding or deleting renumbers the others: their selection entries would
+  // point at different ones.
+  const forgetSelected = () =>
+    setBulkSelectedElements((prev) =>
+      prev.filter((el) => el.type !== ObjectType.AREA),
+    );
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const { emitDelta, isApplyingRemoteRef } = useCollab();
   const shouldEmit = () => !isApplyingRemoteRef?.current;
 
   // `at`: where a new area goes (the centre of the view by default).
   const addArea = (data, addToHistory = true, at = null) => {
+    if (data) forgetSelected();
     let created = data;
     if (data) {
       setAreas((prev) => {
@@ -64,6 +72,7 @@ export default function AreasContextProvider({ children }) {
 
   const deleteArea = (id, addToHistory = true) => {
     if (!areas[id]) return;
+    forgetSelected();
     if (addToHistory) {
       Toast.success(t("area_deleted"));
       setUndoStack((prev) => [

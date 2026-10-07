@@ -13,6 +13,7 @@ import {
 } from "@douyinfe/semi-icons";
 import { useTranslation } from "react-i18next";
 import { ObjectType } from "../../data/constants";
+import { sameNoteOrArea } from "../../utils/utils";
 import {
   useAreas,
   useDiagram,
@@ -45,8 +46,10 @@ export default function ContextMenu({ menu, onClose }) {
       ? tables.some((tb) => tb.id === target.id)
       : target.element === ObjectType.RELATIONSHIP
         ? relationships.some((r) => r.id === target.id)
-        : (target.element === ObjectType.NOTE ? notes : areas)[target.id] ===
-          target.object);
+        : sameNoteOrArea(
+            (target.element === ObjectType.NOTE ? notes : areas)[target.id],
+            target.object,
+          ));
 
   useEffect(() => {
     if (menu && !stillThere) onClose();
