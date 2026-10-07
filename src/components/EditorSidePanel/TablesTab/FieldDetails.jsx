@@ -14,6 +14,7 @@ import {
   useDiagram,
   useLayout,
   useUndoRedo,
+  useElementActions,
 } from "../../../hooks";
 import { useTranslation } from "react-i18next";
 import { databases } from "../../../data/databases";
@@ -26,7 +27,8 @@ export default function FieldDetails({ data, tid }) {
   const { tables, database } = useDiagram();
   const resolved = resolveType(database, data.type);
   const { setUndoStack, setRedoStack } = useUndoRedo();
-  const { updateField, deleteField } = useDiagram();
+  const { updateField } = useDiagram();
+  const { removeField } = useElementActions();
   const [editField, setEditField] = useState({});
   const table = useMemo(() => tables.find((t) => t.id === tid), [tables, tid]);
 
@@ -409,7 +411,7 @@ export default function FieldDetails({ data, tid }) {
         type="danger"
         block
         disabled={layout.readOnly}
-        onClick={() => deleteField(data, tid)}
+        onClick={() => removeField(data, tid)}
       >
         {t("delete")}
       </Button>

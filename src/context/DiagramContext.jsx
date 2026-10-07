@@ -36,13 +36,14 @@ export default function DiagramContextProvider({ children }) {
     [emitDelta, isApplyingRemoteRef],
   );
 
-  const addTable = (data, addToHistory = true) => {
+  // `at`: where a new empty table goes (the centre of the view by default).
+  const addTable = (data, addToHistory = true, at = null) => {
     const id = nanoid();
     const newTable = {
       id,
       name: `table_${id}`,
-      x: transform.pan.x,
-      y: transform.pan.y,
+      x: at?.x ?? transform.pan.x,
+      y: at?.y ?? transform.pan.y,
       locked: false,
       fields: [
         {
@@ -275,8 +276,12 @@ export default function DiagramContextProvider({ children }) {
       });
     } else {
       setRelationships((prev) => {
+        const restored = data.relationship || data;
+        // Undoing the deletion of two linked tables brings their shared
+        // relationship back once.
+        if (prev.some((r) => r.id === restored.id)) return prev;
         const temp = prev.slice();
-        temp.splice(data.index, 0, data.relationship || data);
+        temp.splice(data.index, 0, restored);
         return temp;
       });
     }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Slot } from "../../context/ExtensionsContext";
 import {
   Action,
@@ -15,6 +15,7 @@ import Table from "./Table";
 import Area from "./Area";
 import Relationship from "./Relationship";
 import Note from "./Note";
+import ContextMenu from "./ContextMenu";
 import {
   useCanvas,
   useSettings,
@@ -86,6 +87,11 @@ export default function Canvas() {
   } = useCollab();
   const lastLinkingRef = useRef(false);
   const rightClickPanned = useRef(false);
+  // Right click: the menu opens on release, unless the press panned.
+  const [contextMenu, setContextMenu] = useState(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const rightDownRef = useRef(false);
+  const pendingMenuRef = useRef(null);
   const pointerDownActiveRef = useRef(false);
   const dragLockIdsRef = useRef([]);
 
@@ -229,6 +235,58 @@ export default function Canvas() {
     } else {
       setBulkSelectedElements(elements);
     }
+  };
+
+  // What a right click is on, from the data-ctx-* marks of the elements.
+  const contextTarget = (node) => {
+    const marked = node?.closest?.("[data-ctx-type]");
+    if (!marked) return null;
+    const element = Number(marked.dataset.ctxType);
+    const raw = marked.dataset.ctxId;
+    if (element === ObjectType.TABLE) {
+      const table = tables.find((tb) => String(tb.id) === raw);
+      if (!table) return null;
+      const fieldRaw = node.closest("[data-ctx-field]")?.dataset.ctxField;
+      const field = table.fields.find((f) => String(f.id) === fieldRaw);
+      return { element, id: table.id, fieldId: field?.id };
+    }
+    if (element === ObjectType.RELATIONSHIP) {
+      const relationship = relationships.find((r) => String(r.id) === raw);
+      return relationship ? { element, id: relationship.id } : null;
+    }
+    // Notes and areas are numbered by position.
+    return { element, id: Number(raw) };
+  };
+
+  const menuRequest = (e) => {
+    const svg = canvasRef.current;
+    const point = svg.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+    const at = point.matrixTransform(svg.getScreenCTM().inverse());
+    return {
+      x: e.clientX,
+      y: e.clientY,
+      at: { x: at.x, y: at.y },
+      target: contextTarget(e.target),
+    };
+  };
+
+  const openContextMenu = (request) => {
+    const { target } = request;
+    if (target) {
+      setSelectedElement((prev) => ({
+        ...prev,
+        element: target.element,
+        id: target.id,
+        open: false,
+      }));
+      const inSelection = bulkSelectedElements.some(
+        (el) => el.type === target.element && el.id === target.id,
+      );
+      if (!inSelection) setBulkSelectedElements([]);
+    }
+    setContextMenu(request);
   };
 
   const handlePointerDownOnElement = (e, { element, type }) => {
@@ -453,6 +511,10 @@ export default function Canvas() {
    */
   const handlePointerDown = async (e) => {
     if (!e.isPrimary) return;
+    if (e.button === 2) {
+      rightDownRef.current = true;
+      pendingMenuRef.current = null;
+    }
 
     // don't pan if the sidesheet for editing a table is open
     if (
@@ -469,6 +531,15 @@ export default function Canvas() {
 
     if (isMouseLeftButton) {
       const pointerDownElement = elementPointerDown;
+      // A click on the empty canvas leaves nothing selected (so Delete has
+      // nothing to delete).
+      if (pointerDownElement === null && !e.ctrlKey && !e.metaKey) {
+        setSelectedElement((prev) =>
+          prev.element === ObjectType.NONE
+            ? prev
+            : { ...prev, element: ObjectType.NONE, id: -1, open: false },
+        );
+      }
       setBulkSelectRect({
         x1: pointer.spaces.diagram.x,
         y1: pointer.spaces.diagram.y,
@@ -513,6 +584,15 @@ export default function Canvas() {
           }
           if (!pointerDownActiveRef.current) {
             releaseTableLocks(tableIds);
+            // Released before the lock came: a click, which still selects.
+            if (!e.ctrlKey && !e.metaKey) {
+              setSelectedElement((prev) => ({
+                ...prev,
+                element: ObjectType.TABLE,
+                id: clickedTableId,
+                open: false,
+              }));
+            }
             return;
           }
           dragLockIdsRef.current = tableIds;
@@ -567,6 +647,14 @@ export default function Canvas() {
   const handlePointerUp = (e) => {
     if (!e.isPrimary) return;
     pointerDownActiveRef.current = false;
+    if (e.button === 2) {
+      rightDownRef.current = false;
+      const pending = pendingMenuRef.current;
+      pendingMenuRef.current = null;
+      if (pending && !(panning.isPanning && didPan())) {
+        openContextMenu(pending);
+      }
+    }
     if (selectedElement.open && !layout.sidebar) return;
 
     if (didDrag()) {
@@ -732,6 +820,7 @@ export default function Canvas() {
     "wheel",
     (e) => {
       e.preventDefault();
+      setContextMenu(null);
 
       if (e.ctrlKey || e.metaKey) {
         const eagernessFactor = 0.05;
@@ -790,10 +879,18 @@ export default function Canvas() {
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
           onContextMenu={(e) => {
-            if (rightClickPanned.current) {
-              e.preventDefault();
-              rightClickPanned.current = false;
+            e.preventDefault();
+            // Linux and macOS send this on press: wait for the release.
+            if (rightDownRef.current) {
+              pendingMenuRef.current = menuRequest(e);
+              return;
             }
+            // Windows sends it on release, also after a pan.
+            if (rightClickPanned.current) {
+              rightClickPanned.current = false;
+              return;
+            }
+            openContextMenu(menuRequest(e));
           }}
           className="absolute w-full h-full touch-none"
           viewBox={`${viewBox.left} ${viewBox.top} ${viewBox.width} ${viewBox.height}`}
@@ -892,6 +989,7 @@ export default function Canvas() {
           )}
         </svg>
       </div>
+      <ContextMenu menu={contextMenu} onClose={closeContextMenu} />
       {settings.showDebugCoordinates && (
         <div className="fixed flex flex-col flex-wrap gap-6 bg-[rgba(var(--semi-grey-1),var(--tw-bg-opacity))]/40 border border-color bottom-4 right-4 p-4 rounded-xl backdrop-blur-xs pointer-events-none select-none">
           <table className="table-auto grow">

@@ -20,7 +20,8 @@ export default function NotesContextProvider({ children }) {
   const { emitDelta, isApplyingRemoteRef } = useCollab();
   const shouldEmit = () => !isApplyingRemoteRef?.current;
 
-  const addNote = (data, addToHistory = true) => {
+  // `at`: where a new note goes (the centre of the view by default).
+  const addNote = (data, addToHistory = true, at = null) => {
     let created = data;
     if (data) {
       setNotes((prev) => {
@@ -32,8 +33,8 @@ export default function NotesContextProvider({ children }) {
       const height = 88;
       created = {
         id: notes.length,
-        x: transform.pan.x,
-        y: transform.pan.y - height / 2,
+        x: at?.x ?? transform.pan.x,
+        y: at?.y ?? transform.pan.y - height / 2,
         title: `note_${notes.length}`,
         content: "",
         locked: false,

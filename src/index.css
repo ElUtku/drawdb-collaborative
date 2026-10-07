@@ -238,6 +238,25 @@
   pointer-events: stroke;
 }
 
+.relationship-path.relationship-selected {
+  stroke: #0084d1;
+  stroke-width: 4;
+}
+
+.relationship-handle {
+  fill: white;
+  stroke: #0084d1;
+  stroke-width: 2;
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.group:hover .relationship-handle,
+.relationship-handle.relationship-selected {
+  opacity: 1;
+}
+
 .group:hover .relationship-path {
   stroke: #0084d1;
   stroke-width: 6;

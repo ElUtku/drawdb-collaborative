@@ -43,8 +43,6 @@ import {
   pngExportPixelRatio,
 } from "../../data/constants";
 import { useHotkeys } from "react-hotkeys-hook";
-import { Validator } from "jsonschema";
-import { areaSchema, noteSchema, tableSchema } from "../../data/schemas";
 import { db } from "../../data/db";
 import {
   useLayout,
@@ -60,6 +58,7 @@ import {
   useEnums,
   useFullscreen,
   useNavigateWithParams,
+  useElementActions,
 } from "../../hooks";
 import { enterFullscreen, exitFullscreen } from "../../utils/fullscreen";
 import { dataURItoBlob } from "../../utils/utils";
@@ -138,7 +137,9 @@ export default function ControlPanel({
   const { notes, setNotes, updateNote, addNote, deleteNote } = useNotes();
   const { areas, setAreas, updateArea, addArea, deleteArea } = useAreas();
   const { undoStack, redoStack, setUndoStack, setRedoStack } = useUndoRedo();
-  const { selectedElement, setSelectedElement } = useSelect();
+  const { selectedElement, setSelectedElement, bulkSelectedElements } =
+    useSelect();
+  const elementActions = useElementActions();
   const { transform, setTransform } = useTransform();
   const { t, i18n } = useTranslation();
   const { version, gistId, setGistId, role } = useContext(IdContext);
@@ -766,122 +767,29 @@ export default function ControlPanel({
       }
     }
   };
+  // A dialog or the table side sheet has the keyboard: Delete is theirs.
+  const dialogOpen = () =>
+    [...document.querySelectorAll(".semi-modal, .semi-sidesheet-inner")].some(
+      (el) => el.getClientRects().length > 0,
+    );
   const del = () => {
-    if (layout.readOnly) {
+    if (layout.readOnly || dialogOpen()) {
       return;
     }
-    switch (selectedElement.element) {
-      case ObjectType.TABLE:
-        deleteTable(selectedElement.id);
-        break;
-      case ObjectType.NOTE:
-        deleteNote(selectedElement.id);
-        break;
-      case ObjectType.AREA:
-        deleteArea(selectedElement.id);
-        break;
-      default:
-        break;
+    if (bulkSelectedElements.length > 1) {
+      elementActions.removeMany(bulkSelectedElements);
+      return;
     }
+    elementActions.remove(selectedElement);
   };
   const duplicate = () => {
     if (layout.readOnly) {
       return;
     }
-    switch (selectedElement.element) {
-      case ObjectType.TABLE: {
-        const copiedTable = tables.find((t) => t.id === selectedElement.id);
-        addTable({
-          table: {
-            ...copiedTable,
-            x: copiedTable.x + 20,
-            y: copiedTable.y + 20,
-            id: nanoid(),
-          },
-        });
-        break;
-      }
-      case ObjectType.NOTE:
-        addNote({
-          ...notes[selectedElement.id],
-          x: notes[selectedElement.id].x + 20,
-          y: notes[selectedElement.id].y + 20,
-          id: notes.length,
-        });
-        break;
-      case ObjectType.AREA:
-        addArea({
-          ...areas[selectedElement.id],
-          x: areas[selectedElement.id].x + 20,
-          y: areas[selectedElement.id].y + 20,
-          id: areas.length,
-        });
-        break;
-      default:
-        break;
-    }
+    elementActions.duplicate(selectedElement);
   };
-  const copy = () => {
-    switch (selectedElement.element) {
-      case ObjectType.TABLE:
-        navigator.clipboard
-          .writeText(
-            JSON.stringify(tables.find((t) => t.id === selectedElement.id)),
-          )
-          .catch(() => Toast.error(t("oops_smth_went_wrong")));
-        break;
-      case ObjectType.NOTE:
-        navigator.clipboard
-          .writeText(JSON.stringify({ ...notes[selectedElement.id] }))
-          .catch(() => Toast.error(t("oops_smth_went_wrong")));
-        break;
-      case ObjectType.AREA:
-        navigator.clipboard
-          .writeText(JSON.stringify({ ...areas[selectedElement.id] }))
-          .catch(() => Toast.error(t("oops_smth_went_wrong")));
-        break;
-      default:
-        break;
-    }
-  };
-  const paste = () => {
-    if (layout.readOnly) {
-      return;
-    }
-    navigator.clipboard.readText().then((text) => {
-      let obj = null;
-      try {
-        obj = JSON.parse(text);
-      } catch (error) {
-        return;
-      }
-      const v = new Validator();
-      if (v.validate(obj, tableSchema).valid) {
-        addTable({
-          table: {
-            ...obj,
-            x: obj.x + 20,
-            y: obj.y + 20,
-            id: nanoid(),
-          },
-        });
-      } else if (v.validate(obj, areaSchema).valid) {
-        addArea({
-          ...obj,
-          x: obj.x + 20,
-          y: obj.y + 20,
-          id: areas.length,
-        });
-      } else if (v.validate(obj, noteSchema)) {
-        addNote({
-          ...obj,
-          x: obj.x + 20,
-          y: obj.y + 20,
-          id: notes.length,
-        });
-      }
-    });
-  };
+  const copy = () => elementActions.copy(selectedElement);
+  const paste = () => elementActions.paste();
   const cut = () => {
     if (layout.readOnly) {
       return;
@@ -1719,7 +1627,7 @@ export default function ControlPanel({
   useHotkeys("mod+c", copy, { preventDefault: true });
   useHotkeys("mod+v", paste, { preventDefault: true });
   useHotkeys("mod+x", cut, { preventDefault: true });
-  useHotkeys("delete", del, { preventDefault: true });
+  useHotkeys("delete, backspace", del, { preventDefault: true });
   useHotkeys("mod+shift+g", viewGrid, { preventDefault: true });
   useHotkeys("mod+up", zoomIn, { preventDefault: true });
   useHotkeys("mod+down", zoomOut, { preventDefault: true });

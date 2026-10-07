@@ -15,7 +15,8 @@ export default function AreasContextProvider({ children }) {
   const { emitDelta, isApplyingRemoteRef } = useCollab();
   const shouldEmit = () => !isApplyingRemoteRef?.current;
 
-  const addArea = (data, addToHistory = true) => {
+  // `at`: where a new area goes (the centre of the view by default).
+  const addArea = (data, addToHistory = true, at = null) => {
     let created = data;
     if (data) {
       setAreas((prev) => {
@@ -29,8 +30,8 @@ export default function AreasContextProvider({ children }) {
       created = {
         id: areas.length,
         name: `area_${areas.length}`,
-        x: transform.pan.x - width / 2,
-        y: transform.pan.y - height / 2,
+        x: at?.x ?? transform.pan.x - width / 2,
+        y: at?.y ?? transform.pan.y - height / 2,
         width,
         height,
         color: defaultBlue,

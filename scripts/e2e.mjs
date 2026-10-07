@@ -690,7 +690,222 @@ await bob.page.waitForTimeout(2500);
 }
 await shot(bob.page, "09-imported-dump");
 
-// --- 12. Admin: activity, backups, delete with transfer ------------------------------------------
+// --- 12. Canvas: selection, Delete, context menu, moving a line ---------------------------------
+{
+  const page = admin.page;
+  await page.goto(`${BASE}/editor`);
+  await pickDatabase(page);
+  await page.getByRole("button", { name: "Add table", exact: true }).click();
+  await page.waitForURL(/\/diagrams\//, { timeout: 15000 });
+  await page.waitForTimeout(1500);
+  const id = page.url().split("/diagrams/")[1];
+  const current = await api(page, "GET", `/api/diagrams/${id}`);
+  const linked = {
+    database: "postgresql",
+    tables: [
+      {
+        ...table(
+          "k1",
+          "customers",
+          [
+            field("a1", "id", "INTEGER", { primary: true }),
+            field("a2", "email", "VARCHAR", { size: "120" }),
+          ],
+          0,
+        ),
+        y: 0,
+      },
+      {
+        ...table(
+          "k2",
+          "orders",
+          [
+            field("b1", "id", "INTEGER", { primary: true }),
+            field("b2", "customer_id", "INTEGER"),
+          ],
+          450,
+        ),
+        y: 200,
+      },
+    ],
+    references: [
+      {
+        id: "kr1",
+        name: "fk_orders_customer",
+        startTableId: "k2",
+        startFieldId: "b2",
+        endTableId: "k1",
+        endFieldId: "a1",
+        fields: [{ startFieldId: "b2", endFieldId: "a1" }],
+        cardinality: "many_to_one",
+        updateConstraint: "No action",
+        deleteConstraint: "Cascade",
+      },
+    ],
+    notes: [],
+    areas: [],
+    enums: [],
+    types: [],
+  };
+  await api(page, "PUT", `/api/diagrams/${id}`, {
+    document: linked,
+    baseVersion: current.data.version,
+  });
+  await page.reload();
+  await page.waitForTimeout(2500);
+  const saved = async () =>
+    (await api(page, "GET", `/api/diagrams/${id}`)).data.document;
+  const settle = () => page.waitForTimeout(2500);
+  const line =
+    '[data-testid="relationship-fk_orders_customer"] path.relationship-path';
+  // A point in the middle of the line, in screen coordinates.
+  const middle = () =>
+    page.evaluate((selector) => {
+      const path = document.querySelector(selector);
+      const point = path.getPointAtLength(path.getTotalLength() / 2);
+      const screen = new DOMPoint(point.x, point.y).matrixTransform(
+        path.ownerSVGElement.getScreenCTM(),
+      );
+      return { x: screen.x, y: screen.y };
+    }, line);
+  const menuItems = () => page.getByRole("menuitem").allInnerTexts();
+  const dialog = page.getByRole("dialog");
+
+  let point = await middle();
+  await page.mouse.click(point.x, point.y);
+  await page.waitForTimeout(400);
+  const selected = /relationship-selected/.test(
+    await page.locator(line).getAttribute("class"),
+  );
+  await page.keyboard.press("Delete");
+  await settle();
+  const afterDelete = (await saved()).references.length;
+  await page.keyboard.press("Control+z");
+  await settle();
+  check(
+    "a clicked relationship is selected, Delete removes it and undo brings it back",
+    selected && afterDelete === 0 && (await saved()).references.length === 1,
+    `selected ${selected}, after Delete ${afterDelete}`,
+  );
+
+  await page.mouse.move(point.x, point.y);
+  const handle = await page
+    .locator('[data-testid="relationship-handle-fk_orders_customer"]')
+    .boundingBox();
+  await page.mouse.move(handle.x + 8, handle.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 292, handle.y + 8, { steps: 10 });
+  await page.mouse.up();
+  await settle();
+  const offset = (await saved()).references[0].bendOffset;
+  check(
+    "dragging a line's handle moves it, and the route is saved",
+    Number.isFinite(offset) && offset < -200,
+    `bendOffset ${offset}`,
+  );
+  await shot(page, "12-moved-line");
+
+  point = await middle();
+  await page.mouse.click(point.x, point.y, { button: "right" });
+  await page.waitForTimeout(500);
+  const relationshipMenu = await menuItems();
+  await page.getByRole("menuitem", { name: "Reset line route" }).click();
+  await settle();
+  check(
+    "the relationship's context menu resets the route",
+    relationshipMenu.includes("Delete") &&
+      !Number.isFinite((await saved()).references[0].bendOffset),
+    relationshipMenu.join(", "),
+  );
+
+  // Right-drag pans the canvas and opens no menu; a right click does.
+  await page.mouse.move(560, 450);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(470, 400, { steps: 8 });
+  await page.mouse.up({ button: "right" });
+  await page.waitForTimeout(400);
+  const menusAfterPan = await page.getByRole("menuitem").count();
+  await page.mouse.click(560, 450, { button: "right" });
+  await page.waitForTimeout(500);
+  const canvasMenu = await menuItems();
+  await shot(page, "13-canvas-menu");
+  await page.getByRole("menuitem", { name: "Add table" }).click();
+  await settle();
+  check(
+    "right-drag pans; a right click on the canvas adds a table where it was",
+    menusAfterPan === 0 &&
+      canvasMenu.join() === "Add table,Add note,Add area,Paste" &&
+      (await saved()).tables.length === 3,
+    `menus after pan ${menusAfterPan}; ${canvasMenu.join(", ")}`,
+  );
+
+  const fieldBox = await page
+    .locator('foreignObject[data-ctx-id="k2"] [data-ctx-field="b2"]')
+    .boundingBox();
+  await page.mouse.click(fieldBox.x + 40, fieldBox.y + 15, { button: "right" });
+  await page.waitForTimeout(500);
+  await page.getByRole("menuitem", { name: "Delete field" }).click();
+  await page.waitForTimeout(600);
+  const fieldWarning = await page
+    .getByTestId("delete-dependencies")
+    .innerText()
+    .catch(() => "");
+  await shot(page, "14-delete-field-dependencies");
+  await dialog.getByRole("button", { name: "cancel" }).click();
+  await settle();
+  check(
+    "deleting a column with a relationship asks first and names it",
+    /1 relationship/.test(fieldWarning) &&
+      /orders\(customer_id\) → customers\(id\)/.test(fieldWarning) &&
+      (await saved()).tables.find((tb) => tb.id === "k2").fields.length === 2,
+    fieldWarning.replace(/\s+/g, " "),
+  );
+
+  const tableBox = await page
+    .locator('foreignObject[data-ctx-id="k1"]')
+    .boundingBox();
+  await page.mouse.click(tableBox.x + 40, tableBox.y + 25, { button: "right" });
+  await page.waitForTimeout(500);
+  await page.getByRole("menuitem", { name: "Delete table" }).click();
+  await page.waitForTimeout(600);
+  await dialog.getByRole("button", { name: "confirm" }).click();
+  await settle();
+  let doc = await saved();
+  const deleted =
+    !doc.tables.some((tb) => tb.id === "k1") && doc.references.length === 0;
+  await page.keyboard.press("Control+z");
+  await settle();
+  doc = await saved();
+  check(
+    "deleting a table deletes its relationships after confirming; undo restores both",
+    deleted &&
+      doc.tables.some((tb) => tb.id === "k1") &&
+      doc.references.length === 1,
+  );
+
+  // Backspace works like Delete, and nothing is deleted once the canvas
+  // was clicked (no selection left).
+  await page.mouse.move(tableBox.x + 40, tableBox.y + 25);
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(600);
+  const asked = await page.getByTestId("delete-dependencies").isVisible();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(800);
+  await page.mouse.click(560, 450);
+  await page.waitForTimeout(300);
+  await page.keyboard.press("Delete");
+  await settle();
+  check(
+    "Backspace asks before deleting a linked table; Delete after clicking the canvas does nothing",
+    asked && (await saved()).tables.length === 3,
+  );
+}
+
+// --- 13. Admin: activity, backups, delete with transfer ------------------------------------------
 await admin.page.reload();
 await pickDatabase(admin.page);
 await admin.page.getByRole("button", { name: "Administration" }).click();
