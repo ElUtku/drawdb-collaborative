@@ -164,6 +164,8 @@ function reference(value, path) {
   for (const key of ["cardinality", "updateConstraint", "deleteConstraint"]) {
     string(value[key], `${path}.${key}`, 64);
   }
+  // Where the user moved the line (see relationshipBendX on the client).
+  number(value.bendOffset, `${path}.bendOffset`);
   array(value.fields, `${path}.fields`, LIMITS.fields).forEach((pair, i) => {
     const at = `${path}.fields[${i}]`;
     object(pair, at);

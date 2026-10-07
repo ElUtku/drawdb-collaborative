@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Slot } from "../../context/ExtensionsContext";
 import {
   Action,
@@ -15,6 +15,7 @@ import Table from "./Table";
 import Area from "./Area";
 import Relationship from "./Relationship";
 import Note from "./Note";
+import ContextMenu from "./ContextMenu";
 import {
   useCanvas,
   useSettings,
@@ -86,6 +87,15 @@ export default function Canvas() {
   } = useCollab();
   const lastLinkingRef = useRef(false);
   const rightClickPanned = useRef(false);
+  // Right click: the menu opens on release, unless the press panned.
+  const [contextMenu, setContextMenu] = useState(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const rightDownRef = useRef(null);
+  // Each press, so a lock granted late knows whether it is still current.
+  const pressRef = useRef(0);
+  // The tables the latest press is taking locks for.
+  const pressTablesRef = useRef([]);
+  const pendingMenuRef = useRef(null);
   const pointerDownActiveRef = useRef(false);
   const dragLockIdsRef = useRef([]);
 
@@ -145,8 +155,8 @@ export default function Canvas() {
     return el1.id === el2.id && el1.type === el2.type;
   };
 
-  const collectSelectedElements = () => {
-    const rect = getRectFromEndpoints(bulkSelectRect);
+  const collectSelectedElements = (box = bulkSelectRect) => {
+    const rect = getRectFromEndpoints(box);
     const elements = [];
     const shouldAddElement = (elementRect, element) => {
       // if ctrl key is pressed, only add the elements that are not already selected
@@ -229,6 +239,61 @@ export default function Canvas() {
     } else {
       setBulkSelectedElements(elements);
     }
+  };
+
+  // What a right click is on, from the data-ctx-* marks of the elements.
+  const contextTarget = (node) => {
+    const marked = node?.closest?.("[data-ctx-type]");
+    if (!marked) return null;
+    const element = Number(marked.dataset.ctxType);
+    const raw = marked.dataset.ctxId;
+    if (element === ObjectType.TABLE) {
+      const table = tables.find((tb) => String(tb.id) === raw);
+      if (!table) return null;
+      const fieldRaw = node.closest("[data-ctx-field]")?.dataset.ctxField;
+      const field = table.fields.find((f) => String(f.id) === fieldRaw);
+      return { element, id: table.id, fieldId: field?.id };
+    }
+    if (element === ObjectType.RELATIONSHIP) {
+      const relationship = relationships.find((r) => String(r.id) === raw);
+      return relationship ? { element, id: relationship.id } : null;
+    }
+    // Notes and areas are numbered by position: the object itself tells
+    // whether the number still means the same one.
+    const id = Number(raw);
+    const object = (element === ObjectType.NOTE ? notes : areas)[id];
+    return object ? { element, id, object } : null;
+  };
+
+  const menuRequest = (e) => {
+    const svg = canvasRef.current;
+    const point = svg.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+    const at = point.matrixTransform(svg.getScreenCTM().inverse());
+    return {
+      x: e.clientX,
+      y: e.clientY,
+      at: { x: at.x, y: at.y },
+      target: contextTarget(e.target),
+    };
+  };
+
+  const openContextMenu = (request) => {
+    const { target } = request;
+    if (target) {
+      setSelectedElement((prev) => ({
+        ...prev,
+        element: target.element,
+        id: target.id,
+        open: false,
+      }));
+      const inSelection = bulkSelectedElements.some(
+        (el) => el.type === target.element && el.id === target.id,
+      );
+      if (!inSelection) setBulkSelectedElements([]);
+    }
+    setContextMenu(request);
   };
 
   const handlePointerDownOnElement = (e, { element, type }) => {
@@ -453,6 +518,17 @@ export default function Canvas() {
    */
   const handlePointerDown = async (e) => {
     if (!e.isPrimary) return;
+    // Side sheets and popovers of canvas objects are portals: their events
+    // bubble here through React, but they are not clicks on the canvas.
+    if (!e.currentTarget.contains(e.target)) return;
+    const press = ++pressRef.current;
+    pressTablesRef.current = [];
+    // Follow the pointer even outside the canvas until this press ends.
+    pointer.followOutside.current = true;
+    if (e.button === 2) {
+      rightDownRef.current = { x: e.clientX, y: e.clientY };
+      pendingMenuRef.current = null;
+    }
 
     // don't pan if the sidesheet for editing a table is open
     if (
@@ -469,12 +545,28 @@ export default function Canvas() {
 
     if (isMouseLeftButton) {
       const pointerDownElement = elementPointerDown;
+      // A click on the empty canvas leaves nothing selected (so Delete has
+      // nothing to delete).
+      const onEmptyCanvas =
+        pointerDownElement === null && !e.target.closest?.("[data-ctx-type]");
+      if (onEmptyCanvas && !e.ctrlKey && !e.metaKey) {
+        // An open note or area editor closes too: save what it changed.
+        if (selectedElement.open) setSaveState(State.SAVING);
+        setSelectedElement((prev) =>
+          prev.element === ObjectType.NONE
+            ? prev
+            : { ...prev, element: ObjectType.NONE, id: -1, open: false },
+        );
+      }
       setBulkSelectRect({
         x1: pointer.spaces.diagram.x,
         y1: pointer.spaces.diagram.y,
         x2: pointer.spaces.diagram.x,
         y2: pointer.spaces.diagram.y,
-        show: elementPointerDown === null || !elementPointerDown.element.locked,
+        // Not from an area's resize handle or a relationship.
+        show:
+          onEmptyCanvas ||
+          (pointerDownElement !== null && !pointerDownElement.element.locked),
         ctrlKey: e.ctrlKey,
         metaKey: e.metaKey,
       });
@@ -507,12 +599,35 @@ export default function Canvas() {
                 .filter((item) => item.type === ObjectType.TABLE)
                 .map((item) => item.id)
             : [clickedTableId];
+          pressTablesRef.current = tableIds;
           if (!(await acquireTableLocks(tableIds))) {
             Toast.warning(t("collaboration_table_lock_unavailable"));
             return;
           }
+          // Another press started meanwhile: this one is over. Keep only the
+          // locks that press needs.
+          if (press !== pressRef.current) {
+            const needed = pressTablesRef.current;
+            releaseTableLocks(tableIds.filter((id) => !needed.includes(id)));
+            return;
+          }
           if (!pointerDownActiveRef.current) {
             releaseTableLocks(tableIds);
+            // Released before the lock came: a click, which still selects,
+            // unless something else was clicked since (or a double-click
+            // already opened this table's editor).
+            if (!e.ctrlKey && !e.metaKey) {
+              setSelectedElement((prev) =>
+                prev.element === ObjectType.TABLE && prev.id === clickedTableId
+                  ? prev
+                  : {
+                      ...prev,
+                      element: ObjectType.TABLE,
+                      id: clickedTableId,
+                      open: false,
+                    },
+              );
+            }
             return;
           }
           dragLockIdsRef.current = tableIds;
@@ -565,8 +680,21 @@ export default function Canvas() {
    * @param {PointerEvent} e
    */
   const handlePointerUp = (e) => {
+    handledPointerUp.current = e.nativeEvent ?? e;
     if (!e.isPrimary) return;
+    pointer.followOutside.current = false;
+    const releasedOnCanvas = Boolean(canvasRef.current?.contains(e.target));
     pointerDownActiveRef.current = false;
+    if (e.button === 2 && rightDownRef.current) {
+      // A few pixels of movement are still a click, not a pan.
+      const start = rightDownRef.current;
+      const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4;
+      rightDownRef.current = null;
+      rightClickPanned.current = moved;
+      const pending = pendingMenuRef.current;
+      pendingMenuRef.current = null;
+      if (pending && !moved) openContextMenu(pending);
+    }
     if (selectedElement.open && !layout.sidebar) return;
 
     if (didDrag()) {
@@ -594,14 +722,19 @@ export default function Canvas() {
     }
 
     if (bulkSelectRect.show) {
-      setBulkSelectRect((prev) => ({
-        ...prev,
-        x2: pointer.spaces.diagram.x,
-        y2: pointer.spaces.diagram.y,
-        show: false,
-      }));
-      if (!isDragging()) {
-        collectSelectedElements();
+      // The box as it is at release (the drawn one may be a move behind);
+      // released outside the canvas, the box as drawn.
+      const box = releasedOnCanvas
+        ? {
+            ...bulkSelectRect,
+            x2: pointer.spaces.diagram.x,
+            y2: pointer.spaces.diagram.y,
+          }
+        : bulkSelectRect;
+      setBulkSelectRect({ ...box, show: false });
+      // Only a box the user drew (not a resize or a link) selects.
+      if (!isDragging() && !linking && areaResize.id === -1) {
+        collectSelectedElements(box);
       }
     }
     setDragging(notDragging);
@@ -613,7 +746,6 @@ export default function Canvas() {
 
     if (panning.isPanning && didPan()) {
       setSaveState(State.SAVING);
-      if (e.button === 2) rightClickPanned.current = true;
     }
     setPanning((old) => ({ ...old, isPanning: false }));
     pointer.setStyle("default");
@@ -728,10 +860,28 @@ export default function Canvas() {
     addRelationship(newRelationship);
   };
 
+  // A button released outside the canvas (over the side panel, or outside
+  // the window) still ends what it started: a pan, a drag, a selection box,
+  // a pending right-click menu.
+  const handledPointerUp = useRef(null);
+  useEventListener("pointerup", (e) => {
+    if (handledPointerUp.current === e) return;
+    pointer.followOutside.current = false;
+    const busy =
+      panning.isPanning ||
+      bulkSelectRect.show ||
+      isDragging() ||
+      linking ||
+      areaResize.id !== -1 ||
+      rightDownRef.current;
+    if (busy) handlePointerUp(e);
+  });
+
   useEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
+      setContextMenu(null);
 
       if (e.ctrlKey || e.metaKey) {
         const eagernessFactor = 0.05;
@@ -790,10 +940,20 @@ export default function Canvas() {
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
           onContextMenu={(e) => {
-            if (rightClickPanned.current) {
-              e.preventDefault();
-              rightClickPanned.current = false;
+            // In a side sheet or popover (a portal): the browser's own menu.
+            if (!e.currentTarget.contains(e.target)) return;
+            e.preventDefault();
+            // Linux and macOS send this on press: wait for the release.
+            if (rightDownRef.current) {
+              pendingMenuRef.current = menuRequest(e);
+              return;
             }
+            // Windows sends it on release, also after a pan.
+            if (rightClickPanned.current) {
+              rightClickPanned.current = false;
+              return;
+            }
+            openContextMenu(menuRequest(e));
           }}
           className="absolute w-full h-full touch-none"
           viewBox={`${viewBox.left} ${viewBox.top} ${viewBox.width} ${viewBox.height}`}
@@ -892,6 +1052,7 @@ export default function Canvas() {
           )}
         </svg>
       </div>
+      <ContextMenu menu={contextMenu} onClose={closeContextMenu} />
       {settings.showDebugCoordinates && (
         <div className="fixed flex flex-col flex-wrap gap-6 bg-[rgba(var(--semi-grey-1),var(--tw-bg-opacity))]/40 border border-color bottom-4 right-4 p-4 rounded-xl backdrop-blur-xs pointer-events-none select-none">
           <table className="table-auto grow">

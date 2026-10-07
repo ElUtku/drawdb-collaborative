@@ -16,11 +16,20 @@ export default function NotesContextProvider({ children }) {
   const [notes, setNotes] = useState([]);
   const { transform } = useTransform();
   const { setUndoStack, setRedoStack } = useUndoRedo();
-  const { selectedElement, setSelectedElement } = useSelect();
+  const { selectedElement, setSelectedElement, setBulkSelectedElements } =
+    useSelect();
+  // Adding or deleting renumbers the others: their selection entries would
+  // point at different ones.
+  const forgetSelected = () =>
+    setBulkSelectedElements((prev) =>
+      prev.filter((el) => el.type !== ObjectType.NOTE),
+    );
   const { emitDelta, isApplyingRemoteRef } = useCollab();
   const shouldEmit = () => !isApplyingRemoteRef?.current;
 
-  const addNote = (data, addToHistory = true) => {
+  // `at`: where a new note goes (the centre of the view by default).
+  const addNote = (data, addToHistory = true, at = null) => {
+    if (data) forgetSelected();
     let created = data;
     if (data) {
       setNotes((prev) => {
@@ -32,8 +41,8 @@ export default function NotesContextProvider({ children }) {
       const height = 88;
       created = {
         id: notes.length,
-        x: transform.pan.x,
-        y: transform.pan.y - height / 2,
+        x: at?.x ?? transform.pan.x,
+        y: at?.y ?? transform.pan.y - height / 2,
         title: `note_${notes.length}`,
         content: "",
         locked: false,
@@ -49,6 +58,8 @@ export default function NotesContextProvider({ children }) {
         {
           action: Action.ADD,
           element: ObjectType.NOTE,
+          // Redo puts it back where it was created.
+          data: created,
           message: t("add_note"),
         },
       ]);
@@ -65,6 +76,8 @@ export default function NotesContextProvider({ children }) {
   };
 
   const deleteNote = (id, addToHistory = true) => {
+    if (!notes[id]) return;
+    forgetSelected();
     if (addToHistory) {
       Toast.success(t("note_deleted"));
       setUndoStack((prev) => [

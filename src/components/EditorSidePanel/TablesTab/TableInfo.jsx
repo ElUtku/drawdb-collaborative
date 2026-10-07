@@ -16,6 +16,7 @@ import {
   useSaveState,
   useUndoRedo,
   useCollab,
+  useElementActions,
 } from "../../../hooks";
 import { Action, ObjectType, State, DB } from "../../../data/constants";
 import TableField from "./TableField";
@@ -33,7 +34,8 @@ export default function TableInfo({ data }) {
   const [commentActiveKey, setCommentActiveKey] = useState("");
   const [showComment, setShowComment] = useState(false);
   const { layout } = useLayout();
-  const { deleteTable, updateTable, setTables } = useDiagram();
+  const { updateTable, setTables } = useDiagram();
+  const { removeTable } = useElementActions();
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const { setSaveState } = useSaveState();
   const [editField, setEditField] = useState({});
@@ -483,7 +485,8 @@ export default function TableInfo({ data }) {
             type="danger"
             disabled={layout.readOnly}
             icon={<IconDeleteStroked />}
-            onClick={() => deleteTable(data.id)}
+            aria-label={t("delete")}
+            onClick={() => removeTable(data.id)}
           />
         </div>
       </div>

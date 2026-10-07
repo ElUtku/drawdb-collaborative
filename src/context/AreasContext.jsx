@@ -10,12 +10,21 @@ export default function AreasContextProvider({ children }) {
   const { t } = useTranslation();
   const [areas, setAreas] = useState([]);
   const { transform } = useTransform();
-  const { selectedElement, setSelectedElement } = useSelect();
+  const { selectedElement, setSelectedElement, setBulkSelectedElements } =
+    useSelect();
+  // Adding or deleting renumbers the others: their selection entries would
+  // point at different ones.
+  const forgetSelected = () =>
+    setBulkSelectedElements((prev) =>
+      prev.filter((el) => el.type !== ObjectType.AREA),
+    );
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const { emitDelta, isApplyingRemoteRef } = useCollab();
   const shouldEmit = () => !isApplyingRemoteRef?.current;
 
-  const addArea = (data, addToHistory = true) => {
+  // `at`: where a new area goes (the centre of the view by default).
+  const addArea = (data, addToHistory = true, at = null) => {
+    if (data) forgetSelected();
     let created = data;
     if (data) {
       setAreas((prev) => {
@@ -29,8 +38,8 @@ export default function AreasContextProvider({ children }) {
       created = {
         id: areas.length,
         name: `area_${areas.length}`,
-        x: transform.pan.x - width / 2,
-        y: transform.pan.y - height / 2,
+        x: at?.x ?? transform.pan.x - width / 2,
+        y: at?.y ?? transform.pan.y - height / 2,
         width,
         height,
         color: defaultBlue,
@@ -44,6 +53,8 @@ export default function AreasContextProvider({ children }) {
         {
           action: Action.ADD,
           element: ObjectType.AREA,
+          // Redo puts it back where it was created.
+          data: created,
           message: t("add_area"),
         },
       ]);
@@ -60,6 +71,8 @@ export default function AreasContextProvider({ children }) {
   };
 
   const deleteArea = (id, addToHistory = true) => {
+    if (!areas[id]) return;
+    forgetSelected();
     if (addToHistory) {
       Toast.success(t("area_deleted"));
       setUndoStack((prev) => [

@@ -16,3 +16,4 @@ export { default as useNavigateWithParams } from "./useNavigateWithParams";
 export { default as useCollab } from "./useCollab";
 export { default as useAuth } from "./useAuth";
 export { default as useCustomTypesVersion } from "./useCustomTypesVersion";
+export { default as useElementActions } from "./useElementActions";

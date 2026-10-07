@@ -768,6 +768,19 @@ const es = {
     access_revoked: "Ya no tienes acceso a este diagrama.",
     access_now_viewer: "Ahora solo puedes ver este diagrama.",
     access_now_editor: "Ya puedes editar este diagrama.",
+    delete_field: "Eliminar campo",
+    deleted_objects_one: "{{count}} objeto eliminado",
+    deleted_objects_other: "{{count}} objetos eliminados",
+    delete_table_item: "Eliminar tabla",
+    reset_route: "Restablecer trazado de la línea",
+    drag_to_move_line: "Arrastra para mover la línea",
+    delete_table_confirm: "¿Eliminar la tabla {{name}}?",
+    delete_field_confirm: "¿Eliminar el campo {{name}}?",
+    delete_selection_confirm: "¿Eliminar los {{count}} objetos seleccionados?",
+    delete_dependencies_one:
+      "Tiene {{count}} relación, que también se eliminará:",
+    delete_dependencies_other:
+      "Tiene {{count}} relaciones, que también se eliminarán:",
     no_access: "Sin acceso",
     custom_types_save_failed:
       "No se pudieron guardar los tipos personalizados.",

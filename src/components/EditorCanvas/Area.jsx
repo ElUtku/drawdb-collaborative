@@ -151,7 +151,7 @@ export default function Area({
   }, [selectedElement, data, bulkSelectedElements]);
 
   return (
-    <g ref={ref}>
+    <g ref={ref} data-ctx-type={ObjectType.AREA} data-ctx-id={data.id}>
       <foreignObject
         key={data.id}
         x={data.x}

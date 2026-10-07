@@ -17,6 +17,9 @@ preparado para autoalojarse, incluso en servidores sin Internet.
 - Permisos por diagrama: propietario, editores y lectores (solo lectura).
 - Diagramas guardados en el servidor (SQLite), con **historial de versiones**: comparar,
   restaurar y nombrar versiones.
+- Editor con menú contextual (clic derecho), borrado con `Supr`/`Retroceso`, líneas de
+  relación que se pueden mover y confirmación al borrar algo de lo que dependen relaciones (ver
+  [Editor](#editor)).
 - Exportación de SQL para MySQL, MariaDB, PostgreSQL, SQLite, SQL Server y Oracle, con opciones
   configurables y revisión previa de los problemas (ver [Exportar SQL](#exportar-sql)), y
   **migraciones `ALTER TABLE`** entre dos versiones (ver [Migraciones](#migraciones-entre-versiones)).
@@ -168,6 +171,24 @@ lectura (salvo `/data`), sin *capabilities* y con un *healthcheck*.
   le pone una nueva desde el panel (**Restablecer contraseña**) y el usuario la cambia después.
 - Si se pierde la cuenta de administrador, se recupera por SQL:
   `UPDATE users SET is_admin = 1 WHERE username = '<usuario>';`
+
+## Editor
+
+- **Clic derecho** sobre una tabla, una columna, una relación, una nota, un área o el lienzo
+  vacío abre un menú con las acciones habituales: editar, duplicar, copiar, borrar, borrar la
+  columna, restablecer el trazado de una relación, o añadir una tabla, nota o área donde se ha
+  hecho clic y pegar. Arrastrar con el botón derecho sigue moviendo el lienzo.
+- **`Supr`** (o **`Retroceso`** en Mac) borra lo seleccionado: tabla, relación (se selecciona
+  con un clic), nota, área o todo lo seleccionado con el recuadro. Un clic en el lienzo vacío
+  quita la selección, para no borrar nada por error. Todo se puede deshacer con `Ctrl+Z`.
+- Si se borra una tabla o una columna de la que dependen relaciones, se pide confirmación y se
+  listan las relaciones que se borrarán con ella, desde cualquier sitio (teclado, menús, panel
+  lateral).
+- Las **líneas de las relaciones se pueden mover**: al pasar por encima aparece un punto en su
+  tramo vertical que se arrastra a izquierda o derecha (por ejemplo, para rodear otra tabla);
+  cada extremo sale por el lado de su tabla que queda hacia ese tramo. La posición se guarda
+  relativa a las dos tablas, así que acompaña a la línea cuando se mueven, y **Restablecer
+  trazado** en el menú contextual la devuelve al trazado automático.
 
 ## Exportar SQL
 
@@ -366,7 +387,8 @@ está instalado.
 aparte con `npm install --no-save playwright`): crear, desactivar y eliminar cuentas; crear un
 diagrama; compartirlo como lector y como editor y ver los cambios de permisos en directo;
 historial, restauración y migración; exportaciones SQL, C++ y Protobuf; importar un volcado de
-`pg_dump`; tipos personalizados;
+`pg_dump`; selección y borrado con teclado, menú contextual, confirmación de dependencias y
+mover líneas de relación; tipos personalizados;
 registro de actividad y copias de seguridad. Arranca su propio servidor con una base de datos
 temporal y comprueba también que ninguna petición sale del servidor.
 

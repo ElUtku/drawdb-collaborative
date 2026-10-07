@@ -160,10 +160,7 @@ export function getFieldHeight(field, containerWidth, showComments = true) {
 }
 
 export function getRelationshipFields(relationship) {
-  if (
-    Array.isArray(relationship?.fields) &&
-    relationship.fields.length > 0
-  ) {
+  if (Array.isArray(relationship?.fields) && relationship.fields.length > 0) {
     return relationship.fields;
   }
   return [
@@ -257,4 +254,23 @@ export function getTableHeight(
     tableColorStripHeight +
     getCommentHeight(table.comment, width, showComments)
   );
+}
+
+/**
+ * Whether two notes (or two areas) are the same one. They are numbered by
+ * position and a collaborator's save replaces every object, so neither the
+ * number nor the object identity tells.
+ */
+export function sameNoteOrArea(a, b) {
+  if (!a || !b) return false;
+  return [
+    "x",
+    "y",
+    "width",
+    "height",
+    "title",
+    "name",
+    "content",
+    "color",
+  ].every((key) => a[key] === b[key]);
 }

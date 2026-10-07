@@ -1,7 +1,27 @@
 import { useMemo, useRef, useState, useEffect } from "react";
-import { Cardinality, ObjectType, Tab } from "../../data/constants";
-import { calcPath, calcCompositePath } from "../../utils/calcPath";
-import { useDiagram, useSettings, useLayout, useSelect } from "../../hooks";
+import {
+  Action,
+  Cardinality,
+  ObjectType,
+  Tab,
+  gridSize,
+} from "../../data/constants";
+import {
+  bendOrigin,
+  calcPath,
+  calcCompositePath,
+  clampBend,
+  defaultBend,
+  fieldAnchorY,
+  relationshipBendX,
+} from "../../utils/calcPath";
+import {
+  useDiagram,
+  useSettings,
+  useLayout,
+  useSelect,
+  useUndoRedo,
+} from "../../hooks";
 import { useTranslation } from "react-i18next";
 import { SideSheet } from "@douyinfe/semi-ui";
 import RelationshipInfo from "../EditorSidePanel/RelationshipsTab/RelationshipInfo";
@@ -15,10 +35,15 @@ const labelFontSize = 16;
 
 export default function Relationship({ data }) {
   const { settings } = useSettings();
-  const { tables, relationships } = useDiagram();
+  const { tables, relationships, updateRelationship } = useDiagram();
   const { layout } = useLayout();
-  const { selectedElement, setSelectedElement } = useSelect();
+  const { selectedElement, setSelectedElement, setBulkSelectedElements } =
+    useSelect();
+  const { setUndoStack, setRedoStack } = useUndoRedo();
   const { t } = useTranslation();
+  // While the line is being dragged: where its vertical segment is.
+  const [dragBendX, setDragBendX] = useState(null);
+  const dragRef = useRef(null);
 
   const pathValues = useMemo(() => {
     const startTable = tables.find((t) => t.id === data.startTableId);
@@ -66,6 +91,23 @@ export default function Relationship({ data }) {
 
   const isComposite = (pathValues?.startFieldIndices?.length ?? 0) > 1;
 
+  // While dragging, the segment also stays clear of the tables.
+  const bendX = !pathValues
+    ? null
+    : dragBendX !== null
+      ? clampBend(
+          dragBendX,
+          pathValues.startTable,
+          pathValues.endTable,
+          settings.tableWidth,
+        )
+      : relationshipBendX(
+          data,
+          pathValues.startTable,
+          pathValues.endTable,
+          settings.tableWidth,
+        );
+
   const composite = useMemo(() => {
     if (!pathValues || !isComposite) return null;
     return calcCompositePath(
@@ -78,8 +120,31 @@ export default function Relationship({ data }) {
       settings.tableWidth,
       1,
       settings.showComments,
+      bendX,
     );
-  }, [pathValues, isComposite, settings.tableWidth, settings.showComments]);
+  }, [
+    pathValues,
+    isComposite,
+    settings.tableWidth,
+    settings.showComments,
+    bendX,
+  ]);
+
+  const path = pathValues
+    ? composite
+      ? composite.path
+      : calcPath(
+          pathValues,
+          settings.tableWidth,
+          1,
+          settings.showComments,
+          bendX,
+        )
+    : "";
+
+  const isSelected =
+    selectedElement.element === ObjectType.RELATIONSHIP &&
+    selectedElement.id === data.id;
 
   const pathRef = useRef();
   const labelRef = useRef();
@@ -144,6 +209,121 @@ export default function Relationship({ data }) {
     cardinalityEndY = point2.y;
   }
 
+  // The grip that moves the line: on its vertical segment.
+  let handle = null;
+  if (composite) {
+    handle = composite.labelPoint;
+  } else if (pathValues && Number.isFinite(bendX)) {
+    const anchor = (table, index) =>
+      fieldAnchorY(table, index, settings.tableWidth, settings.showComments);
+    handle = {
+      x: bendX,
+      y:
+        (anchor(pathValues.startTable, pathValues.startFieldIndex) +
+          anchor(pathValues.endTable, pathValues.endFieldIndex)) /
+        2,
+    };
+  } else if (pathValues) {
+    // Where the automatic route has its vertical segment, so the first
+    // movement continues from there.
+    handle = defaultBend(
+      pathValues,
+      settings.tableWidth,
+      1,
+      settings.showComments,
+    );
+  }
+
+  const select = () => {
+    setSelectedElement((prev) => ({
+      ...prev,
+      element: ObjectType.RELATIONSHIP,
+      id: data.id,
+      open: false,
+    }));
+    setBulkSelectedElements([]);
+  };
+
+  // Pointer position in diagram coordinates.
+  const diagramX = (e) => {
+    const svg = e.currentTarget.ownerSVGElement;
+    const point = svg.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+    return point.matrixTransform(svg.getScreenCTM().inverse()).x;
+  };
+
+  const startDrag = (e) => {
+    if (!e.isPrimary || e.button !== 0) return;
+    e.stopPropagation();
+    select();
+    if (layout.readOnly || !handle) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = {
+      grab: diagramX(e) - handle.x,
+      startX: e.clientX,
+      moved: false,
+      x: null,
+    };
+  };
+
+  const drag = (e) => {
+    if (!dragRef.current) return;
+    e.stopPropagation();
+    // A click that wobbles a pixel or two is not a move.
+    if (!dragRef.current.moved) {
+      if (Math.abs(e.clientX - dragRef.current.startX) < 4) return;
+      dragRef.current.moved = true;
+    }
+    let x = diagramX(e) - dragRef.current.grab;
+    if (settings.snapToGrid) x = Math.round(x / gridSize) * gridSize;
+    dragRef.current.x = x;
+    setDragBendX(x);
+  };
+
+  const endDrag = (e) => {
+    const state = dragRef.current;
+    dragRef.current = null;
+    setDragBendX(null);
+    if (!state) return;
+    e.stopPropagation();
+    if (!state.moved || state.x === null || !pathValues) return;
+    const x = clampBend(
+      state.x,
+      pathValues.startTable,
+      pathValues.endTable,
+      settings.tableWidth,
+    );
+    if (x === null) return;
+    const offset =
+      Math.round(
+        (x -
+          bendOrigin(
+            pathValues.startTable,
+            pathValues.endTable,
+            settings.tableWidth,
+          )) *
+          10,
+      ) / 10;
+    if (offset === data.bendOffset) return;
+    setUndoStack((prev) => [
+      ...prev,
+      {
+        action: Action.EDIT,
+        element: ObjectType.RELATIONSHIP,
+        rid: data.id,
+        undo: { bendOffset: data.bendOffset ?? null },
+        redo: { bendOffset: offset },
+        message: t("edit_relationship", {
+          refName: data.name,
+          extra: "[route]",
+        }),
+      },
+    ]);
+    setRedoStack([]);
+    updateRelationship(data.id, { bendOffset: offset });
+  };
+
   const edit = () => {
     if (!layout.sidebar) {
       setSelectedElement((prev) => ({
@@ -171,19 +351,21 @@ export default function Relationship({ data }) {
 
   return (
     <>
-      <g className="select-none group" onDoubleClick={edit}>
+      <g
+        className="select-none group"
+        onDoubleClick={edit}
+        onPointerDown={(e) => {
+          if (!e.isPrimary || e.button !== 0) return;
+          e.stopPropagation();
+          select();
+        }}
+        data-ctx-type={ObjectType.RELATIONSHIP}
+        data-ctx-id={data.id}
+        data-testid={`relationship-${data.name}`}
+      >
         {/* invisible wider path for better hover ux */}
         <path
-          d={
-            composite
-              ? composite.path
-              : calcPath(
-                  pathValues,
-                  settings.tableWidth,
-                  1,
-                  settings.showComments,
-                )
-          }
+          d={path}
           fill="none"
           stroke="transparent"
           strokeWidth={12}
@@ -191,17 +373,8 @@ export default function Relationship({ data }) {
         />
         <path
           ref={pathRef}
-          d={
-            composite
-              ? composite.path
-              : calcPath(
-                  pathValues,
-                  settings.tableWidth,
-                  1,
-                  settings.showComments,
-                )
-          }
-          className="relationship-path"
+          d={path}
+          className={`relationship-path${isSelected ? " relationship-selected" : ""}`}
           fill="none"
           cursor="pointer"
         />
@@ -231,6 +404,30 @@ export default function Relationship({ data }) {
               text={cardinalityEnd}
             />
           </>
+        )}
+        {handle && !layout.readOnly && (
+          <circle
+            cx={handle.x}
+            cy={handle.y}
+            r={7}
+            className={`relationship-handle${
+              isSelected || dragBendX !== null ? " relationship-selected" : ""
+            }`}
+            data-testid={`relationship-handle-${data.name}`}
+            onPointerDown={startDrag}
+            onPointerMove={drag}
+            onPointerUp={endDrag}
+            onLostPointerCapture={() => {
+              dragRef.current = null;
+              setDragBendX(null);
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              edit();
+            }}
+          >
+            <title>{t("drag_to_move_line")}</title>
+          </circle>
         )}
       </g>
       <SideSheet

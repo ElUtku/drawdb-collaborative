@@ -36,6 +36,7 @@ import {
   useUndoRedo,
   useCollab,
   useCustomTypesVersion,
+  useElementActions,
 } from "../../hooks";
 import TableInfo from "../EditorSidePanel/TablesTab/TableInfo";
 import { useTranslation } from "react-i18next";
@@ -60,15 +61,9 @@ export default function Table({
 }) {
   const [hoveredField, setHoveredField] = useState(null);
   const { layout } = useLayout();
-  const {
-    database,
-    tables,
-    relationships,
-    addTable,
-    deleteTable,
-    deleteField,
-    updateTable,
-  } = useDiagram();
+  const { database, tables, relationships, addTable, updateTable } =
+    useDiagram();
+  const { removeTable, removeField } = useElementActions();
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const { settings } = useSettings();
   const { t } = useTranslation();
@@ -294,6 +289,8 @@ export default function Table({
           lockedByParticipant ? "cursor-not-allowed" : "cursor-move"
         }`}
         onPointerDown={onPointerDown}
+        data-ctx-type={ObjectType.TABLE}
+        data-ctx-id={tableData.id}
       >
         <div
           onDoubleClick={openEditor}
@@ -412,7 +409,7 @@ export default function Table({
                           block
                           style={{ justifyContent: "flex-start" }}
                           onClick={() =>
-                            runWithTableLock(() => deleteTable(tableData.id))
+                            removeTable(tableData.id, { run: runWithTableLock })
                           }
                           disabled={layout.readOnly || lockedByParticipant}
                         >
@@ -559,6 +556,7 @@ export default function Table({
         className={`${
           index === visibleFields.length - 1 ? "" : "border-b border-gray-400"
         } group w-full overflow-hidden`}
+        data-ctx-field={fieldData.id}
         onPointerEnter={(e) => {
           if (!e.isPrimary) return;
 
@@ -639,7 +637,9 @@ export default function Table({
                 disabled={layout.readOnly || lockedByParticipant}
                 onClick={() => {
                   if (layout.readOnly) return;
-                  runWithTableLock(() => deleteField(fieldData, tableData.id));
+                  removeField(fieldData, tableData.id, {
+                    run: runWithTableLock,
+                  });
                 }}
               />
             ) : settings.showDataTypes ? (

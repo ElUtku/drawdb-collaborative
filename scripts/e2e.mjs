@@ -690,7 +690,407 @@ await bob.page.waitForTimeout(2500);
 }
 await shot(bob.page, "09-imported-dump");
 
-// --- 12. Admin: activity, backups, delete with transfer ------------------------------------------
+// --- 12. Canvas: selection, Delete, context menu, moving a line ---------------------------------
+{
+  const page = admin.page;
+  await page.goto(`${BASE}/editor`);
+  await pickDatabase(page);
+  await page.getByRole("button", { name: "Add table", exact: true }).click();
+  await page.waitForURL(/\/diagrams\//, { timeout: 15000 });
+  await page.waitForTimeout(1500);
+  const id = page.url().split("/diagrams/")[1];
+  const current = await api(page, "GET", `/api/diagrams/${id}`);
+  const linked = {
+    database: "postgresql",
+    tables: [
+      {
+        ...table(
+          "k1",
+          "customers",
+          [
+            field("a1", "id", "INTEGER", { primary: true }),
+            field("a2", "email", "VARCHAR", { size: "120" }),
+          ],
+          0,
+        ),
+        y: 0,
+      },
+      {
+        ...table(
+          "k2",
+          "orders",
+          [
+            field("b1", "id", "INTEGER", { primary: true }),
+            field("b2", "customer_id", "INTEGER"),
+          ],
+          450,
+        ),
+        y: 200,
+      },
+    ],
+    references: [
+      {
+        id: "kr1",
+        name: "fk_orders_customer",
+        startTableId: "k2",
+        startFieldId: "b2",
+        endTableId: "k1",
+        endFieldId: "a1",
+        fields: [{ startFieldId: "b2", endFieldId: "a1" }],
+        cardinality: "many_to_one",
+        updateConstraint: "No action",
+        deleteConstraint: "Cascade",
+      },
+    ],
+    notes: [],
+    areas: [],
+    enums: [],
+    types: [],
+  };
+  await api(page, "PUT", `/api/diagrams/${id}`, {
+    document: linked,
+    baseVersion: current.data.version,
+  });
+  await page.reload();
+  await page.waitForTimeout(2500);
+  const saved = async () =>
+    (await api(page, "GET", `/api/diagrams/${id}`)).data.document;
+  const settle = () => page.waitForTimeout(2500);
+  const line =
+    '[data-testid="relationship-fk_orders_customer"] path.relationship-path';
+  // A point in the middle of the line, in screen coordinates.
+  const middle = () =>
+    page.evaluate((selector) => {
+      const path = document.querySelector(selector);
+      const point = path.getPointAtLength(path.getTotalLength() / 2);
+      const screen = new DOMPoint(point.x, point.y).matrixTransform(
+        path.ownerSVGElement.getScreenCTM(),
+      );
+      return { x: screen.x, y: screen.y };
+    }, line);
+  const menuItems = () => page.getByRole("menuitem").allInnerTexts();
+  // A point of the canvas with nothing on it.
+  const emptySpot = () =>
+    page.evaluate(() => {
+      const canvas = document.getElementById("diagram").getBoundingClientRect();
+      for (let y = canvas.top + 60; y < canvas.bottom - 120; y += 40) {
+        for (let x = canvas.left + 60; x < canvas.right - 60; x += 40) {
+          const hit = document.elementFromPoint(x, y);
+          if (hit?.closest("#diagram") && !hit.closest("[data-ctx-type]")) {
+            return { x, y };
+          }
+        }
+      }
+      return null;
+    });
+  const dialog = page.getByRole("dialog");
+
+  let point = await middle();
+  await page.mouse.click(point.x, point.y);
+  await page.waitForTimeout(400);
+  const selected = /relationship-selected/.test(
+    await page.locator(line).getAttribute("class"),
+  );
+  await page.keyboard.press("Delete");
+  await settle();
+  const afterDelete = (await saved()).references.length;
+  await page.keyboard.press("Control+z");
+  await settle();
+  check(
+    "a clicked relationship is selected, Delete removes it and undo brings it back",
+    selected && afterDelete === 0 && (await saved()).references.length === 1,
+    `selected ${selected}, after Delete ${afterDelete}`,
+  );
+
+  await page.mouse.move(point.x, point.y);
+  const handle = await page
+    .locator('[data-testid="relationship-handle-fk_orders_customer"]')
+    .boundingBox();
+  await page.mouse.move(handle.x + 8, handle.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 292, handle.y + 8, { steps: 10 });
+  await page.mouse.up();
+  await settle();
+  const offset = (await saved()).references[0].bendOffset;
+  check(
+    "dragging a line's handle moves it, and the route is saved",
+    Number.isFinite(offset) && offset < -200,
+    `bendOffset ${offset}`,
+  );
+  await shot(page, "12-moved-line");
+
+  point = await middle();
+  await page.mouse.click(point.x, point.y, { button: "right" });
+  await page.waitForTimeout(500);
+  const relationshipMenu = await menuItems();
+  await page.getByRole("menuitem", { name: "Reset line route" }).click();
+  await settle();
+  check(
+    "the relationship's context menu resets the route",
+    relationshipMenu.includes("Delete") &&
+      !Number.isFinite((await saved()).references[0].bendOffset),
+    relationshipMenu.join(", "),
+  );
+
+  // Right-drag pans the canvas and opens no menu; a right click does.
+  let free = await emptySpot();
+  await page.mouse.move(free.x, free.y);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(free.x + 90, free.y + 50, { steps: 8 });
+  await page.mouse.up({ button: "right" });
+  await page.waitForTimeout(200);
+  // And back, so the view is where the next steps expect it.
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(free.x, free.y, { steps: 8 });
+  await page.mouse.up({ button: "right" });
+  await page.waitForTimeout(400);
+  const menusAfterPan = await page
+    .getByRole("menuitem", { name: "Add note" })
+    .count();
+  free = await emptySpot();
+  await page.mouse.click(free.x, free.y, { button: "right" });
+  await page.waitForTimeout(500);
+  const canvasMenu = await menuItems();
+  await shot(page, "13-canvas-menu");
+  await page.getByRole("menuitem", { name: "Add table" }).click();
+  await settle();
+  check(
+    "right-drag pans; a right click on the canvas adds a table where it was",
+    menusAfterPan === 0 &&
+      canvasMenu.join() === "Add table,Add note,Add area,Paste" &&
+      (await saved()).tables.length === 3,
+    `menus after pan ${menusAfterPan}; ${canvasMenu.join(", ")}`,
+  );
+
+  const fieldBox = await page
+    .locator('foreignObject[data-ctx-id="k2"] [data-ctx-field="b2"]')
+    .boundingBox();
+  await page.mouse.click(fieldBox.x + 40, fieldBox.y + 15, { button: "right" });
+  await page.waitForTimeout(500);
+  await page.getByRole("menuitem", { name: "Delete field" }).click();
+  await page.waitForTimeout(600);
+  const fieldWarning = await page
+    .getByTestId("delete-dependencies")
+    .innerText()
+    .catch(() => "");
+  await shot(page, "14-delete-field-dependencies");
+  await dialog.getByRole("button", { name: "cancel" }).click();
+  await settle();
+  check(
+    "deleting a column with a relationship asks first and names it",
+    /1 relationship/.test(fieldWarning) &&
+      /orders\(customer_id\) → customers\(id\)/.test(fieldWarning) &&
+      (await saved()).tables.find((tb) => tb.id === "k2").fields.length === 2,
+    fieldWarning.replace(/\s+/g, " "),
+  );
+
+  const tableBox = await page
+    .locator('foreignObject[data-ctx-id="k1"]')
+    .boundingBox();
+  await page.mouse.click(tableBox.x + 40, tableBox.y + 25, { button: "right" });
+  await page.waitForTimeout(500);
+  await page.getByRole("menuitem", { name: "Delete table" }).click();
+  await page.waitForTimeout(600);
+  await dialog.getByRole("button", { name: "confirm" }).click();
+  await settle();
+  let doc = await saved();
+  const deleted =
+    !doc.tables.some((tb) => tb.id === "k1") && doc.references.length === 0;
+  await page.keyboard.press("Control+z");
+  await settle();
+  doc = await saved();
+  check(
+    "deleting a table deletes its relationships after confirming; undo restores both",
+    deleted &&
+      doc.tables.some((tb) => tb.id === "k1") &&
+      doc.references.length === 1,
+  );
+
+  // Backspace works like Delete, and nothing is deleted once the canvas
+  // was clicked (no selection left).
+  const spot = await emptySpot();
+  await page.mouse.move(tableBox.x + 40, tableBox.y + 25);
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(600);
+  const asked = await page.getByTestId("delete-dependencies").isVisible();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(800);
+  await page.mouse.click(spot.x, spot.y);
+  await page.waitForTimeout(300);
+  await page.keyboard.press("Delete");
+  await settle();
+  check(
+    "Backspace asks before deleting a linked table; Delete after clicking the canvas does nothing",
+    asked && (await saved()).tables.length === 3,
+  );
+
+  // Keys typed in the side panel are not canvas shortcuts.
+  await page.mouse.move(tableBox.x + 40, tableBox.y + 25);
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Add table", exact: true }).focus();
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(600);
+  const askedFromPanel = await page
+    .getByTestId("delete-dependencies")
+    .isVisible()
+    .catch(() => false);
+  // Ctrl+X cuts what Ctrl+C copies, never a relationship.
+  point = await middle();
+  await page.mouse.click(point.x, point.y);
+  await page.keyboard.press("Control+x");
+  await settle();
+  check(
+    "Delete/Backspace with the focus outside the canvas and Ctrl+X on a relationship delete nothing",
+    !askedFromPanel && (await saved()).references.length === 1,
+  );
+
+  // A rubber-band selection: one question, one undo step, and pressing
+  // Delete again afterwards is harmless.
+  // Everything in view first (Fit window), then a box around customers and
+  // orders, starting from a corner with nothing on it.
+  await page.keyboard.press("Control+Alt+w");
+  await page.waitForTimeout(800);
+  const band = await page.evaluate(() => {
+    const rects = ["k1", "k2"].map((id) =>
+      document
+        .querySelector(`foreignObject[data-ctx-id="${id}"]`)
+        .getBoundingClientRect(),
+    );
+    const left = Math.min(...rects.map((r) => r.left)) - 30;
+    const top = Math.min(...rects.map((r) => r.top)) - 30;
+    const right = Math.min(
+      Math.max(...rects.map((r) => r.right)) + 30,
+      window.innerWidth - 4,
+    );
+    const bottom = Math.min(
+      Math.max(...rects.map((r) => r.bottom)) + 30,
+      window.innerHeight - 4,
+    );
+    const free = ([x, y]) => {
+      const hit = document.elementFromPoint(x, y);
+      return hit?.closest("#diagram") && !hit.closest("[data-ctx-type]");
+    };
+    const corners = [
+      [
+        [left, top],
+        [right, bottom],
+      ],
+      [
+        [right, bottom],
+        [left, top],
+      ],
+      [
+        [left, bottom],
+        [right, top],
+      ],
+      [
+        [right, top],
+        [left, bottom],
+      ],
+    ];
+    return corners.find(([corner]) => free(corner)) ?? corners[0];
+  });
+  await page.mouse.move(...band[0]);
+  await page.mouse.down();
+  await page.mouse.move(...band[1], { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(600);
+  const bulkAsked = await page.getByTestId("delete-dependencies").isVisible();
+  await dialog.getByRole("button", { name: "confirm" }).click();
+  await settle();
+  const emptied = !(await saved()).tables.some((tb) =>
+    ["k1", "k2"].includes(tb.id),
+  );
+  await page.keyboard.press("Delete");
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(800);
+  const editorAlive = await page
+    .getByRole("button", { name: "Add table", exact: true })
+    .isVisible();
+  await page.keyboard.press("Control+z");
+  await settle();
+  doc = await saved();
+  check(
+    "a rubber-band deletion asks once, undoes in one step, and a second Delete is harmless",
+    bulkAsked &&
+      emptied &&
+      editorAlive &&
+      ["k1", "k2"].every((id) => doc.tables.some((tb) => tb.id === id)) &&
+      doc.references.length === 1,
+    `asked ${bulkAsked}, emptied ${emptied}, alive ${editorAlive}, restored ${doc.tables.length}/${doc.references.length}`,
+  );
+
+  // Resizing an area by its corner selects nothing on the way.
+  {
+    const current = await api(page, "GET", `/api/diagrams/${id}`);
+    await api(page, "PUT", `/api/diagrams/${id}`, {
+      document: {
+        ...current.data.document,
+        areas: [
+          {
+            id: 0,
+            name: "zone",
+            x: -400,
+            y: -100,
+            width: 200,
+            height: 60,
+            color: "#175e7a",
+          },
+        ],
+      },
+      baseVersion: current.data.version,
+    });
+    await page.reload();
+    await page.waitForTimeout(2500);
+    await page.keyboard.press("Control+Alt+w");
+    await page.waitForTimeout(800);
+    const toScreen = (x, y) =>
+      page.evaluate(
+        ([px, py]) => {
+          const svg = document.getElementById("diagram");
+          const p = new DOMPoint(px, py).matrixTransform(svg.getScreenCTM());
+          return { x: p.x, y: p.y };
+        },
+        [x, y],
+      );
+    const inside = await toScreen(-300, -70);
+    const corner = await toScreen(-200, -40);
+    const target = await toScreen(260, 180);
+    await page.mouse.move(inside.x, inside.y);
+    await page.waitForTimeout(300);
+    await page.mouse.move(corner.x, corner.y);
+    await page.mouse.down();
+    await page.mouse.move(target.x, target.y, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    await page.keyboard.press("Delete");
+    await page.waitForTimeout(600);
+    // Had the table been swept into the selection, Delete would now ask
+    // about its relationship.
+    const swept = await page.getByTestId("delete-dependencies").isVisible();
+    if (swept) await page.keyboard.press("Escape");
+    await settle();
+    const after = await saved();
+    check(
+      "resizing an area over a table selects nothing, so Delete keeps the table",
+      !swept &&
+        after.tables.some((tb) => tb.id === "k1") &&
+        after.areas[0]?.width > 400,
+      `area ${JSON.stringify(after.areas[0] && { w: after.areas[0].width, h: after.areas[0].height })}`,
+    );
+  }
+}
+
+// --- 13. Admin: activity, backups, delete with transfer ------------------------------------------
 await admin.page.reload();
 await pickDatabase(admin.page);
 await admin.page.getByRole("button", { name: "Administration" }).click();

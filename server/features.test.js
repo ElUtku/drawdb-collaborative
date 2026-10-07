@@ -1037,6 +1037,14 @@ test("documents the editor really produces pass validation", async () => {
         cardinality: "many_to_one",
         updateConstraint: "No action",
         deleteConstraint: "Cascade",
+        bendOffset: -42.5,
+      },
+      {
+        id: "r2",
+        name: "fk2",
+        startTableId: "t1",
+        endTableId: "t1",
+        bendOffset: null,
       },
     ],
     notes: [
@@ -1059,6 +1067,12 @@ test("documents the editor really produces pass validation", async () => {
     zoom: 1,
   };
   assert.equal(documentProblem(editorLike), null);
+  assert.match(
+    documentProblem({
+      references: [{ startTableId: "a", endTableId: "b", bendOffset: "far" }],
+    }),
+    /references\[0\]\.bendOffset: must be a number/,
+  );
   for (const template of templates) {
     assert.doesNotThrow(() => assertValidDocument(template));
   }

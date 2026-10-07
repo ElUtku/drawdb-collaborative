@@ -206,6 +206,8 @@ export default function Note({ data, onPointerDown }) {
 
   return (
     <g
+      data-ctx-type={ObjectType.NOTE}
+      data-ctx-id={data.id}
       onPointerEnter={(e) => e.isPrimary && setHovered(true)}
       onPointerLeave={(e) => e.isPrimary && setHovered(false)}
       onPointerDown={(e) => {
