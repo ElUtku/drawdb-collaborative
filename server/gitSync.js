@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   createGitStore,
+  credentialConfig,
   git,
   GitError,
   isMissingRef,
@@ -11,7 +12,6 @@ import {
   serializeDiagramFile,
   slugifyFileName,
   toGitError,
-  withCredentials,
 } from "./git.js";
 import { DIAGRAM_ID_PATTERN, isPlainObject } from "./protocol.js";
 
@@ -92,15 +92,11 @@ export function createGitSyncService({ db, store, rootDir }) {
       });
     }
     const token = settingsStore.token(diagramId);
-    return {
-      settings,
+    const { config, secrets } = credentialConfig(settings.remoteUrl, {
+      authUsername: settings.authUsername,
       token,
-      url: withCredentials(settings.remoteUrl, {
-        authUsername: settings.authUsername,
-        token,
-      }),
-      secrets: token ? [token] : [],
-    };
+    });
+    return { settings, url: settings.remoteUrl, config, secrets };
   };
 
   const filePaths = (settings) => {
@@ -115,7 +111,7 @@ export function createGitSyncService({ db, store, rootDir }) {
    * Brings the working copy to the tip of the remote branch. Returns null when
    * the branch does not exist yet, which is the normal state of a fresh repo.
    */
-  const prepare = async (diagramId, { settings, url, secrets }) => {
+  const prepare = async (diagramId, { settings, url, secrets, config }) => {
     const dir = repositoryPath(diagramId);
     fs.mkdirSync(dir, { recursive: true });
     if (!fs.existsSync(path.join(dir, ".git"))) {
@@ -136,7 +132,7 @@ export function createGitSyncService({ db, store, rootDir }) {
           url,
           `+${branchRef}:refs/remotes/origin/${settings.branch}`,
         ],
-        { cwd: dir, secrets, timeout: NETWORK_TIMEOUT_MS },
+        { cwd: dir, secrets, config, timeout: NETWORK_TIMEOUT_MS },
       );
       head = (
         await git(["rev-parse", `refs/remotes/origin/${settings.branch}`], {
@@ -158,12 +154,35 @@ export function createGitSyncService({ db, store, rootDir }) {
     return { dir, head };
   };
 
+  // Symbolic links are checked out as plain files (core.symlinks=false), but
+  // a working copy left by an older version could still hold one; refusing to
+  // follow any keeps a repository from pointing our writes outside it.
+  const assertNoLinks = (dir, relativePath) => {
+    let current = dir;
+    for (const segment of relativePath.split("/")) {
+      current = path.join(current, segment);
+      let stat;
+      try {
+        stat = fs.lstatSync(current);
+      } catch {
+        return;
+      }
+      if (stat.isSymbolicLink()) {
+        throw new GitError(
+          `${relativePath} is a symbolic link in the repository; refusing to use it`,
+        );
+      }
+    }
+  };
+
   const writeSchemaFiles = (dir, settings, { name, document, sql }) => {
+    const paths = filePaths(settings);
+    assertNoLinks(dir, paths.json);
+    assertNoLinks(dir, paths.sql);
     const target = settings.directory
       ? path.join(dir, settings.directory)
       : dir;
     fs.mkdirSync(target, { recursive: true });
-    const paths = filePaths(settings);
     fs.writeFileSync(
       path.join(dir, paths.json),
       serializeDiagramFile(name, document),
@@ -180,10 +199,15 @@ export function createGitSyncService({ db, store, rootDir }) {
 
   const commitAndPush = async (
     diagramId,
-    { settings, url, secrets },
+    { settings, url, secrets, config },
     { name, document, sql, message, author },
   ) => {
-    const { dir } = await prepare(diagramId, { settings, url, secrets });
+    const { dir } = await prepare(diagramId, {
+      settings,
+      url,
+      secrets,
+      config,
+    });
     const files = writeSchemaFiles(dir, settings, { name, document, sql });
 
     await git(["add", "-A", "--", "."], { cwd: dir });
@@ -199,6 +223,7 @@ export function createGitSyncService({ db, store, rootDir }) {
     await git(["push", url, `HEAD:refs/heads/${settings.branch}`], {
       cwd: dir,
       secrets,
+      config,
       timeout: NETWORK_TIMEOUT_MS,
     });
     return { status: "pushed", commit, files, message };
@@ -250,7 +275,11 @@ export function createGitSyncService({ db, store, rootDir }) {
         try {
           const { stdout } = await git(
             ["ls-remote", "--heads", config.url, config.settings.branch],
-            { secrets: config.secrets, timeout: NETWORK_TIMEOUT_MS },
+            {
+              secrets: config.secrets,
+              config: config.config,
+              timeout: NETWORK_TIMEOUT_MS,
+            },
           );
           return {
             reachable: true,
@@ -332,6 +361,7 @@ export function createGitSyncService({ db, store, rootDir }) {
             { status: 404 },
           );
         }
+        assertNoLinks(dir, paths.json);
         const file = path.join(dir, paths.json);
         if (!fs.existsSync(file)) {
           throw new GitError(`${paths.json} was not found in the repository`, {

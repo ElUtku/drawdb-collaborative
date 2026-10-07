@@ -16,6 +16,8 @@ import icon from "../../assets/icon_dark_64.png";
 import UserMenu from "./UserMenu";
 import AdminButton from "./AdminButton";
 import GitPanel from "./GitPanel";
+import ShareModal from "./ShareModal";
+import HistoryModal from "./HistoryModal";
 import {
   Divider,
   Dropdown,
@@ -28,14 +30,6 @@ import {
   Typography,
 } from "@douyinfe/semi-ui";
 import { toPng, toJpeg, toSvg } from "html-to-image";
-import {
-  jsonToMySQL,
-  jsonToPostgreSQL,
-  jsonToSQLite,
-  jsonToMariaDB,
-  jsonToSQLServer,
-  jsonToOracleSQL,
-} from "../../utils/exportSQL/generic";
 import {
   ObjectType,
   Action,
@@ -74,17 +68,15 @@ import LayoutDropdown from "./LayoutDropdown";
 import Sidesheet from "./SideSheet/Sidesheet";
 import Modal from "./Modal/Modal";
 import { useTranslation } from "react-i18next";
-import { exportSQL } from "../../utils/exportSQL";
+import { generateMigration, generateSQL } from "../../utils/exportSQL";
+import { loadExportOptions } from "../../utils/exportPreferences";
 import { databases } from "../../data/databases";
 import { jsonToMermaid } from "../../utils/exportAs/mermaid";
-import {
-  defaultProtobufOptions,
-  jsonToProtobuf,
-} from "../../utils/exportAs/protobuf";
+import { generateProtobuf } from "../../utils/exportAs/protobuf";
+import { generateCpp } from "../../utils/exportAs/cpp";
 import { isRtl } from "../../i18n/utils/rtl";
 import { jsonToDocumentation } from "../../utils/exportAs/documentation";
 import { IdContext } from "../Workspace";
-import { socials } from "../../data/socials";
 import { toDBML } from "../../utils/exportAs/dbml";
 import { exportSavedData } from "../../utils/exportSavedData";
 import { diagramApi } from "../../api/diagrams";
@@ -149,9 +141,78 @@ export default function ControlPanel({
   const { selectedElement, setSelectedElement } = useSelect();
   const { transform, setTransform } = useTransform();
   const { t, i18n } = useTranslation();
-  const { version, gistId, setGistId } = useContext(IdContext);
+  const { version, gistId, setGistId, role } = useContext(IdContext);
   const isTemplate = useMatch("/editor/templates/:id");
+  const storedDiagram = Boolean(diagramId) && !isTemplate;
   const navigate = useNavigateWithParams();
+
+  // The SQL export keeps the diagram and settings so the dialog can rebuild
+  // the script whenever a setting changes.
+  const exportSource = (dialect) => {
+    openExportModal(MODAL.CODE);
+    const sqlSource = {
+      tables,
+      references: relationships,
+      types,
+      enums,
+      database,
+    };
+    const sqlOptions = loadExportOptions(`sql.${dialect}`);
+    const { sql, issues } = generateSQL(sqlSource, {
+      dialect,
+      options: sqlOptions,
+    });
+    setExportData((prev) => ({
+      ...prev,
+      data: sql,
+      extension: "sql",
+      sqlSource,
+      sqlDialect: dialect,
+      sqlOptions,
+      sqlIssues: issues,
+      migrationSource: null,
+    }));
+  };
+
+  // The diagram as it is now, as the server stores it.
+  const currentDocument = useMemo(
+    () => ({
+      database,
+      tables,
+      references: relationships,
+      notes,
+      ...(databases[database].hasEnums && { enums }),
+      ...(databases[database].hasTypes && { types }),
+    }),
+    [database, tables, relationships, notes, enums, types],
+  );
+
+  // ALTER script from a saved version to the diagram as it is now.
+  const openMigration = (before, { from }) => {
+    const dialect =
+      database === DB.GENERIC
+        ? exportData.migrationDialect ?? DB.POSTGRES
+        : database;
+    const migrationOptions = loadExportOptions(`migration.${dialect}`);
+    const to = t("migration_current", { name: title });
+    const { sql, issues } = generateMigration(before, currentDocument, {
+      dialect,
+      options: migrationOptions,
+      from,
+      to,
+    });
+    openExportModal(MODAL.CODE);
+    setExportData((prev) => ({
+      ...prev,
+      data: sql,
+      extension: "sql",
+      sqlSource: null,
+      migrationSource: { before, after: currentDocument, from, to },
+      migrationDialect: dialect,
+      migrationOptions,
+      migrationIssues: issues,
+    }));
+  };
 
   const undo = () => {
     if (undoStack.length === 0) return;
@@ -990,6 +1051,8 @@ export default function ControlPanel({
         disabled: layout.readOnly,
       },
       delete_diagram: {
+        // Only the owner may delete a diagram; the server checks it too.
+        disabled: !storedDiagram || role !== "owner",
         warning: {
           title: t("delete_diagram"),
           message: t("are_you_sure_delete_diagram"),
@@ -1012,6 +1075,14 @@ export default function ControlPanel({
             Toast.error(t("oops_smth_went_wrong"));
           }
         },
+      },
+      share: {
+        function: () => setModal(MODAL.SHARE),
+        disabled: !storedDiagram,
+      },
+      version_history: {
+        function: () => setModal(MODAL.HISTORY),
+        disabled: !storedDiagram,
       },
       git_sync: {
         function: () => setModal(MODAL.GIT),
@@ -1102,127 +1173,25 @@ export default function ControlPanel({
       export_source: {
         ...(database === DB.GENERIC && {
           children: [
-            {
-              name: "MySQL",
-              function: () => {
-                openExportModal(MODAL.CODE);
-                const src = jsonToMySQL({
-                  tables: tables,
-                  references: relationships,
-                  types: types,
-                  database: database,
-                });
-                setExportData((prev) => ({
-                  ...prev,
-                  data: src,
-                  extension: "sql",
-                }));
-              },
-            },
-            {
-              name: "PostgreSQL",
-              function: () => {
-                openExportModal(MODAL.CODE);
-                const src = jsonToPostgreSQL({
-                  tables: tables,
-                  references: relationships,
-                  types: types,
-                  database: database,
-                });
-                setExportData((prev) => ({
-                  ...prev,
-                  data: src,
-                  extension: "sql",
-                }));
-              },
-            },
-            {
-              name: "SQLite",
-              function: () => {
-                openExportModal(MODAL.CODE);
-                const src = jsonToSQLite({
-                  tables: tables,
-                  references: relationships,
-                  types: types,
-                  database: database,
-                });
-                setExportData((prev) => ({
-                  ...prev,
-                  data: src,
-                  extension: "sql",
-                }));
-              },
-            },
-            {
-              name: "MariaDB",
-              function: () => {
-                openExportModal(MODAL.CODE);
-                const src = jsonToMariaDB({
-                  tables: tables,
-                  references: relationships,
-                  types: types,
-                  database: database,
-                });
-                setExportData((prev) => ({
-                  ...prev,
-                  data: src,
-                  extension: "sql",
-                }));
-              },
-            },
-            {
-              name: "MSSQL",
-              function: () => {
-                openExportModal(MODAL.CODE);
-                const src = jsonToSQLServer({
-                  tables: tables,
-                  references: relationships,
-                  types: types,
-                  database: database,
-                });
-                setExportData((prev) => ({
-                  ...prev,
-                  data: src,
-                  extension: "sql",
-                }));
-              },
-            },
-            {
-              label: "Beta",
-              name: "Oracle",
-              function: () => {
-                openExportModal(MODAL.CODE);
-                const src = jsonToOracleSQL({
-                  tables: tables,
-                  references: relationships,
-                  types: types,
-                  database: database,
-                });
-                setExportData((prev) => ({
-                  ...prev,
-                  data: src,
-                  extension: "sql",
-                }));
-              },
-            },
-          ],
+            [DB.MYSQL, "MySQL"],
+            [DB.POSTGRES, "PostgreSQL"],
+            [DB.SQLITE, "SQLite"],
+            [DB.MARIADB, "MariaDB"],
+            [DB.MSSQL, "MSSQL"],
+            [DB.ORACLESQL, "Oracle"],
+          ].map(([dialect, name]) => ({
+            name,
+            function: () => exportSource(dialect),
+          })),
         }),
         function: () => {
           if (database === DB.GENERIC) return;
-          openExportModal(MODAL.CODE);
-          const src = exportSQL({
-            tables: tables,
-            references: relationships,
-            types: types,
-            database: database,
-            enums: enums,
-          });
-          setExportData((prev) => ({
-            ...prev,
-            data: src,
-            extension: "sql",
-          }));
+          exportSource(database);
         },
+      },
+      export_migration: {
+        function: () => setModal(MODAL.HISTORY),
+        disabled: !storedDiagram,
       },
       export_as: {
         children: [
@@ -1369,17 +1338,40 @@ export default function ControlPanel({
                 ...(databases[database].hasTypes && { types: types }),
                 ...(databases[database].hasEnums && { enums: enums }),
               };
-              setExportData((prev) => {
-                const protoOptions =
-                  prev.protoOptions ?? defaultProtobufOptions;
-                return {
-                  ...prev,
-                  data: jsonToProtobuf(source, protoOptions),
-                  extension: "proto",
-                  protoSource: source,
-                  protoOptions,
-                };
-              });
+              const protoOptions = loadExportOptions("proto");
+              const { proto, issues } = generateProtobuf(source, protoOptions);
+              setExportData((prev) => ({
+                ...prev,
+                data: proto,
+                extension: "proto",
+                protoSource: source,
+                protoOptions,
+                protoIssues: issues,
+              }));
+            },
+          },
+          {
+            name: "C++",
+            function: () => {
+              openExportModal(MODAL.CODE);
+              const source = {
+                tables,
+                references: relationships,
+                database,
+                title,
+                ...(databases[database].hasTypes && { types }),
+                ...(databases[database].hasEnums && { enums }),
+              };
+              const cppOptions = loadExportOptions("cpp");
+              const { code, issues } = generateCpp(source, cppOptions);
+              setExportData((prev) => ({
+                ...prev,
+                data: code,
+                extension: "hpp",
+                cppSource: source,
+                cppOptions,
+                cppIssues: issues,
+              }));
             },
           },
           {
@@ -1705,15 +1697,14 @@ export default function ControlPanel({
       },
     },
     help: {
-      docs: {
-        function: () => window.open(`${socials.docs}`, "_blank"),
-        shortcut: "Ctrl+H",
+      // The instance serves its own source (AGPL section 13) and the licences
+      // of the bundled libraries, so both stay reachable without Internet.
+      source_code: {
+        function: () => window.open("/source", "_blank", "noopener"),
       },
-      shortcuts: {
-        function: () => window.open(`${socials.docs}/shortcuts`, "_blank"),
-      },
-      ask_on_discord: {
-        function: () => window.open(socials.discord, "_blank"),
+      third_party_licenses: {
+        function: () =>
+          window.open("/third-party-licenses.txt", "_blank", "noopener"),
       },
     },
   };
@@ -1743,9 +1734,6 @@ export default function ControlPanel({
   });
   useHotkeys("mod+alt+c", copyAsImage, { preventDefault: true });
   useHotkeys("enter", resetView, { preventDefault: true });
-  useHotkeys("mod+h", () => window.open(socials.docs, "_blank"), {
-    preventDefault: true,
-  });
   useHotkeys("mod+alt+w", fitWindow, { preventDefault: true });
   useHotkeys("alt+e", toggleDBMLEditor, { preventDefault: true });
 
@@ -1790,6 +1778,21 @@ export default function ControlPanel({
       <ConfigureCustomTypes
         open={modal === MODAL.CONFIG_CUSTOM_TYPES}
         onClose={() => setModal(MODAL.NONE)}
+      />
+      <ShareModal
+        open={modal === MODAL.SHARE}
+        onClose={() => setModal(MODAL.NONE)}
+        diagramId={diagramId}
+      />
+      <HistoryModal
+        open={modal === MODAL.HISTORY}
+        onClose={() => setModal(MODAL.NONE)}
+        diagramId={diagramId}
+        role={role}
+        currentName={title}
+        currentDocument={currentDocument}
+        onRestored={(diagram) => applyDiagram(diagram, { remote: true })}
+        onMigration={openMigration}
       />
       <GitPanel
         open={modal === MODAL.GIT}
@@ -1908,6 +1911,7 @@ export default function ControlPanel({
               className="flex items-center py-1 px-2 hover-2 rounded-sm disabled:opacity-50"
               onClick={() => addTable()}
               disabled={layout.readOnly}
+              aria-label={t("add_table")}
             >
               <IconAddTable />
             </button>
@@ -1917,6 +1921,7 @@ export default function ControlPanel({
               className="py-1 px-2 hover-2 rounded-sm flex items-center disabled:opacity-50"
               onClick={() => addArea()}
               disabled={layout.readOnly}
+              aria-label={t("add_area")}
             >
               <IconAddArea />
             </button>
@@ -1926,6 +1931,7 @@ export default function ControlPanel({
               className="py-1 px-2 hover-2 rounded-sm flex items-center disabled:opacity-50"
               onClick={() => addNote()}
               disabled={layout.readOnly}
+              aria-label={t("add_note")}
             >
               <IconAddNote />
             </button>

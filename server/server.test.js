@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 /* global process */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -50,12 +51,15 @@ function sessionCookieFrom(response) {
 
 const PASSWORD = "correct-horse-9";
 const JSON_HEADERS = { "Content-Type": "application/json" };
+// The first account needs the setup code the server prints on start-up.
+const SETUP_CODE = "test-setup-code";
+process.env.SETUP_CODE = SETUP_CODE;
 
 async function registerAdmin(port, username, password = PASSWORD) {
   const response = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, setupCode: SETUP_CODE }),
   });
   assert.equal(response.status, 201);
   return sessionCookieFrom(response);
@@ -451,11 +455,24 @@ test("diagram listing is scoped to the owner and only owners delete", async (t) 
   ]);
   assert.deepEqual(await listFor(otherCookie), ["legacy-diagram"]);
 
-  // Link sharing: a non-owner can still open and edit the diagram.
+  // New diagrams are private until their owner shares them.
+  const blocked = await fetch(`${base}/api/diagrams/owned-diagram`, {
+    headers: { Cookie: otherCookie },
+  });
+  assert.equal(blocked.status, 403);
+  const shared = await fetch(`${base}/api/diagrams/owned-diagram/access`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Cookie: ownerCookie },
+    body: JSON.stringify({ linkAccess: "editor" }),
+  });
+  assert.equal(shared.status, 200);
+
+  // Link sharing: a non-owner can now open and edit the diagram.
   const read = await fetch(`${base}/api/diagrams/owned-diagram`, {
     headers: { Cookie: otherCookie },
   });
   assert.equal(read.status, 200);
+  assert.equal((await read.json()).role, "editor");
   const edit = await fetch(`${base}/api/diagrams/owned-diagram`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", Cookie: otherCookie },
@@ -713,6 +730,91 @@ test("users change their own password and other sessions end", async (t) => {
   const row = application.database
     .prepare("SELECT password_hash FROM users WHERE username = 'alice'")
     .get();
-  assert.match(row.password_hash, /^scrypt\$[0-9a-f]{32}\$[0-9a-f]{128}$/);
+  assert.match(
+    row.password_hash,
+    /^scrypt\$N=65536,r=8,p=1\$[0-9a-f]{32}\$[0-9a-f]{128}$/,
+  );
   assert.ok(!row.password_hash.includes("admin-chosen-1"));
+});
+
+test("the administrator account needs the setup code from the server log", async (t) => {
+  const logged = [];
+  const application = createApplication({
+    databasePath: ":memory:",
+    setupCode: "printed-on-start",
+    log: (line) => logged.push(line),
+  });
+  const port = await listen(application);
+  t.after(() => {
+    application.websocket.close();
+    application.server.close();
+    application.database.close();
+  });
+  assert.ok(logged.some((line) => line.includes("printed-on-start")));
+  const attempt = (setupCode) =>
+    fetch(`http://127.0.0.1:${port}/api/auth/register`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ username: "root", password: PASSWORD, setupCode }),
+    });
+  assert.equal((await attempt(undefined)).status, 403);
+  assert.equal((await attempt("guessed-code")).status, 403);
+  const created = await attempt("printed-on-start");
+  assert.equal(created.status, 201);
+  assert.equal((await created.json()).user.isAdmin, true);
+});
+
+test("password hashes from older versions are upgraded on sign-in", async (t) => {
+  const application = createApplication({ databasePath: ":memory:" });
+  const port = await listen(application);
+  t.after(() => {
+    application.websocket.close();
+    application.server.close();
+    application.database.close();
+  });
+  await registerAdmin(port, "root");
+  // The format older versions wrote: Node's default scrypt cost.
+  const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync(PASSWORD, salt, 64);
+  const legacy = `scrypt$${salt.toString("hex")}$${key.toString("hex")}`;
+  application.database
+    .prepare("UPDATE users SET password_hash = ? WHERE username = 'root'")
+    .run(legacy);
+
+  const login = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ username: "root", password: PASSWORD }),
+  });
+  assert.equal(login.status, 200);
+  const { password_hash: upgraded } = application.database
+    .prepare("SELECT password_hash FROM users WHERE username = 'root'")
+    .get();
+  assert.match(upgraded, /^scrypt\$N=65536,r=8,p=1\$/);
+  const again = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ username: "root", password: PASSWORD }),
+  });
+  assert.equal(again.status, 200);
+});
+
+test("pages are served with a restrictive content security policy", async (t) => {
+  const application = createApplication({ databasePath: ":memory:" });
+  const port = await listen(application);
+  t.after(() => {
+    application.websocket.close();
+    application.server.close();
+    application.database.close();
+  });
+  const response = await fetch(`http://127.0.0.1:${port}/source`);
+  assert.equal(response.status, 200);
+  const policy = response.headers.get("content-security-policy");
+  assert.match(policy, /script-src 'self'(;|$)/);
+  assert.match(policy, /frame-ancestors 'none'/);
+  assert.match(
+    policy,
+    new RegExp(`connect-src 'self' ws://127\\.0\\.0\\.1:${port}`),
+  );
+  assert.match(await response.text(), /GNU Affero General Public License/);
 });

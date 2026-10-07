@@ -11,6 +11,7 @@ import {
   MESSAGE_TYPES,
 } from "./protocol.js";
 import { createTableLockManager } from "./tableLocks.js";
+import { canEdit, canView } from "./database.js";
 
 const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 
@@ -37,7 +38,10 @@ function originAllowed(request) {
   }
 }
 
-export function attachCollaborationServer(server, store, auth) {
+// Close code sent when someone loses access to a diagram they have open.
+export const ACCESS_REVOKED = 4403;
+
+export function attachCollaborationServer(server, { store, auth, diagrams }) {
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_MESSAGE_BYTES,
@@ -94,14 +98,23 @@ export function attachCollaborationServer(server, store, auth) {
       socket.destroy();
       return;
     }
-    if (!store.get(diagramId)) {
+    const diagram = store.get(diagramId);
+    if (!diagram) {
       socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    const role = store.roleFor(diagram, session.user);
+    if (!canView(role)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
       ws.diagramId = diagramId;
       ws.user = session.user;
+      ws.role = role;
+      ws.ip = request.socket.remoteAddress;
       wss.emit("connection", ws, request);
     });
   });
@@ -153,6 +166,7 @@ export function attachCollaborationServer(server, store, auth) {
           type: MESSAGE_TYPES.JOINED,
           diagramId,
           version: diagram.version,
+          role: socket.role,
         });
         if (message.lastVersion !== diagram.version) {
           send(socket, { type: MESSAGE_TYPES.SNAPSHOT, diagramId, ...diagram });
@@ -174,6 +188,29 @@ export function attachCollaborationServer(server, store, auth) {
         return;
       }
 
+      // Viewers follow along (presence, cursors) but cannot change anything.
+      const changes = [
+        MESSAGE_TYPES.OPERATION,
+        MESSAGE_TYPES.OPERATION_PREVIEW,
+        MESSAGE_TYPES.TABLE_LOCK_ACQUIRE,
+        MESSAGE_TYPES.TABLE_LOCK_RENEW,
+      ];
+      if (changes.includes(message.type) && !canEdit(socket.role)) {
+        send(socket, {
+          type: MESSAGE_TYPES.ERROR,
+          code: "read_only",
+          // Echoed so the client can settle the request it is waiting on.
+          ...(CLIENT_ID_PATTERN.test(message.operationId || "") && {
+            operationId: message.operationId,
+          }),
+          ...(CLIENT_ID_PATTERN.test(message.requestId || "") && {
+            requestId: message.requestId,
+          }),
+          message: "You can only view this diagram",
+        });
+        return;
+      }
+
       if (message.type === MESSAGE_TYPES.OPERATION) {
         const valid =
           CLIENT_ID_PATTERN.test(message.clientId || "") &&
@@ -190,13 +227,28 @@ export function attachCollaborationServer(server, store, auth) {
           });
           return;
         }
-        const result = store.updateSnapshot({
+        const result = diagrams.update({
           id: diagramId,
           name: message.operation.payload.name,
           document: message.operation.payload.document,
           baseVersion: message.baseVersion,
           operationId: message.operationId,
+          user: socket.user,
+          ip: socket.ip,
         });
+        if (result.status === "invalid") {
+          send(socket, {
+            type: MESSAGE_TYPES.ERROR,
+            code: "invalid_document",
+            operationId: message.operationId,
+            message: `Invalid diagram: ${result.error}`,
+          });
+          return;
+        }
+        if (result.status === "not_found") {
+          socket.close(ACCESS_REVOKED, "Diagram deleted");
+          return;
+        }
         if (result.status === "conflict") {
           send(socket, {
             type: MESSAGE_TYPES.RESYNC_REQUIRED,
@@ -387,6 +439,42 @@ export function attachCollaborationServer(server, store, auth) {
       diagramId,
       ...diagram,
     });
+  };
+  diagrams.setBroadcaster(wss.broadcastSnapshot);
+
+  /**
+   * After sharing settings change (or the diagram is deleted), everyone with
+   * it open gets their new role; those left without access are disconnected.
+   */
+  wss.refreshAccess = (diagramId) => {
+    const diagram = store.get(diagramId);
+    let locksChanged = false;
+    for (const socket of [...(rooms.get(diagramId) ?? [])]) {
+      const role = diagram ? store.roleFor(diagram, socket.user) : "none";
+      if (!canView(role)) {
+        send(socket, { type: MESSAGE_TYPES.ACCESS, diagramId, role: "none" });
+        socket.close(ACCESS_REVOKED, "Access revoked");
+        continue;
+      }
+      if (role === socket.role) continue;
+      socket.role = role;
+      if (!canEdit(role) && socket.participant) {
+        locksChanged =
+          tableLocks.releaseClient(diagramId, socket.participant.clientId) ||
+          locksChanged;
+      }
+      send(socket, { type: MESSAGE_TYPES.ACCESS, diagramId, role });
+    }
+    if (locksChanged) broadcastTableLocks(diagramId);
+  };
+
+  /** Disconnects every socket of an account (disabled, deleted, new password). */
+  wss.closeUser = (userId) => {
+    for (const socket of wss.clients) {
+      if (socket.user?.id === userId) {
+        socket.close(ACCESS_REVOKED, "Signed out");
+      }
+    }
   };
   return wss;
 }

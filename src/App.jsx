@@ -1,14 +1,19 @@
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Routes,
+  Route,
+  useLocation,
+} from "react-router-dom";
 import { lazy, Suspense, useLayoutEffect } from "react";
 import SettingsContextProvider from "./context/SettingsContext";
 import AuthContextProvider from "./context/AuthContext";
 import RequireAuth from "./components/RequireAuth";
 
-// Each page is split out so that opening the landing page does not download the
+// Each page is split out so that opening the login page does not download the
 // editor (and vice versa).
 const Editor = lazy(() => import("./pages/Editor"));
 const Templates = lazy(() => import("./pages/Templates"));
-const LandingPage = lazy(() => import("./pages/LandingPage"));
 const Login = lazy(() => import("./pages/Login"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
@@ -22,7 +27,7 @@ export default function App() {
           <RestoreScroll />
           <Suspense fallback={<RouteFallback />}>
             <Routes>
-              <Route path="/" element={<LandingPage />} />
+              <Route path="/" element={<Navigate to="/editor" replace />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Login mode="register" />} />
               <Route path="/editor" element={protectedRoute(<Editor />)} />

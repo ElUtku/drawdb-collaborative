@@ -9,13 +9,19 @@ import {
 } from "@douyinfe/semi-ui";
 import { Action, ObjectType } from "../../../data/constants";
 import { IconDeleteStroked } from "@douyinfe/semi-icons";
-import { useDiagram, useLayout, useUndoRedo } from "../../../hooks";
+import {
+  useCustomTypesVersion,
+  useDiagram,
+  useLayout,
+  useUndoRedo,
+} from "../../../hooks";
 import { useTranslation } from "react-i18next";
 import { databases } from "../../../data/databases";
 import { resolveType } from "../../../utils/customTypes";
 
 export default function FieldDetails({ data, tid }) {
   const { t } = useTranslation();
+  useCustomTypesVersion();
   const { layout } = useLayout();
   const { tables, database } = useDiagram();
   const resolved = resolveType(database, data.type);
@@ -345,6 +351,28 @@ export default function FieldDetails({ data, tid }) {
           />
         </div>
       )}
+      <div className="flex justify-between items-center my-2">
+        <div>
+          <div className="font-medium">{t("proto_field_number")}</div>
+          <div className="text-xs opacity-60">
+            {t("proto_field_number_hint")}
+          </div>
+        </div>
+        <InputNumber
+          className="w-28 shrink-0"
+          min={1}
+          max={536870911}
+          precision={0}
+          placeholder={t("proto_field_number_auto")}
+          value={data.protoNumber}
+          disabled={layout.readOnly}
+          onChange={(value) =>
+            updateField(tid, data.id, {
+              protoNumber: Number.isInteger(value) ? value : undefined,
+            })
+          }
+        />
+      </div>
       <div className="font-semibold">{t("comment")}</div>
       <TextArea
         className="my-2"

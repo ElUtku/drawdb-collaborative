@@ -88,6 +88,8 @@ export const MODAL = {
   LANGUAGE: 10,
   CONFIG_CUSTOM_TYPES: 11,
   GIT: 12,
+  SHARE: 13,
+  HISTORY: 14,
 };
 
 export const STATUS = {

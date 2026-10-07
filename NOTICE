@@ -1,0 +1,26 @@
+drawDB Collaborative
+
+This program is a modified version of drawDB
+(https://github.com/drawdb-io/drawdb), by way of
+https://github.com/yms2772/drawdb (real-time collaboration and server storage)
+and https://github.com/artempas/drawdb-collaborative-with-auth (accounts and
+Git sync). Like them, it is licensed under the GNU Affero General Public
+License, version 3 (see LICENSE).
+
+Modifications in this version (2026), as required by section 5(a) of the
+licence; the Git history records each change and its date:
+
+- Self-hosting without Internet access: no analytics, CDNs, embedded third-
+  party content or external links; source code and third-party licences are
+  served by the instance itself (/source, /third-party-licenses.txt).
+- New SQL export for MySQL, MariaDB, PostgreSQL, SQLite, SQL Server and
+  Oracle, with documented settings and a review of problems before export.
+- Protobuf export with stable field numbers and reserved fields.
+- Security hardening: setup code for the first account, stronger password
+  hashing, login throttling per address, Content Security Policy, isolation of
+  the Git sync (credentials, symbolic links, allowed hosts), hardened
+  container.
+- Spanish translation completed.
+
+The licences of the third-party libraries included in the program are
+listed in dist/third-party-licenses.txt, generated at build time.

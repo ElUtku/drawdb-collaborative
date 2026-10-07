@@ -22,6 +22,8 @@ export const tableSchema = {
           comment: { type: "string" },
           size: { type: ["string", "number"] },
           values: { type: "array", items: { type: "string" } },
+          // Protobuf field number, kept so the export never renumbers a field.
+          protoNumber: { type: "integer", minimum: 1 },
         },
         required: [
           "id",
@@ -75,6 +77,9 @@ export const tableSchema = {
       type: "array",
       items: { type: ["string"] },
     },
+    // Numbers and names of deleted fields, written as `reserved` in .proto.
+    protoReserved: { type: "array", items: { type: "integer" } },
+    protoReservedNames: { type: "array", items: { type: "string" } },
   },
   required: ["id", "name", "x", "y", "fields", "comment", "indices", "color"],
 };

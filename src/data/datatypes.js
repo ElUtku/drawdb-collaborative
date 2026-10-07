@@ -1940,16 +1940,6 @@ const mssqlTypesBase = {
     hasQuotes: true,
     noDefault: true,
   },
-  CURSOR: {
-    type: "CURSOR",
-    color: otherColor,
-    checkDefault: (field) => true,
-    hasCheck: false,
-    isSized: false,
-    hasPrecision: false,
-    hasQuotes: false,
-    noDefault: true,
-  },
   SQL_VARIANT: {
     type: "SQL_VARIANT",
     color: otherColor,

@@ -8,6 +8,7 @@ import {
   useTypes,
   useUndoRedo,
   useLayout,
+  useCustomTypesVersion,
 } from "../../../hooks";
 import { useTranslation } from "react-i18next";
 import { dbToTypes } from "../../../data/datatypes";
@@ -22,6 +23,8 @@ export default function TableField({ data, tid, index, inherited }) {
   const { layout } = useLayout();
   const { tables, database } = useDiagram();
   const { t } = useTranslation();
+  // Re-render when the shared custom types change.
+  useCustomTypesVersion();
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const [editField, setEditField] = useState({});
   const table = useMemo(() => tables.find((t) => t.id === tid), [tables, tid]);

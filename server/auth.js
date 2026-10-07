@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { promisify } from "node:util";
 
-/* global Buffer */
+/* global Buffer, process */
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -9,6 +9,13 @@ export const SESSION_COOKIE = "drawdb_session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_REFRESH_MS = SESSION_TTL_MS / 2;
 const SCRYPT_KEY_BYTES = 64;
+// Cost of new password hashes: 2^16 rounds of 8 KiB blocks (64 MiB, about a
+// tenth of a second). Hashes made with lower settings are upgraded the next
+// time their owner signs in. The original format, "scrypt$salt$key", used
+// Node's defaults (2^14, 8, 1).
+const SCRYPT_COST = { N: 2 ** 16, r: 8, p: 1 };
+const LEGACY_SCRYPT_COST = { N: 2 ** 14, r: 8, p: 1 };
+const SCRYPT_MAXMEM = 256 * 1024 * 1024;
 const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{3,32}$/;
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 200;
@@ -25,24 +32,70 @@ export function isValidPassword(value) {
   );
 }
 
-async function hashPassword(password) {
+async function hashPassword(password, cost = SCRYPT_COST) {
   const salt = crypto.randomBytes(16);
-  const key = await scrypt(password, salt, SCRYPT_KEY_BYTES);
-  return `scrypt$${salt.toString("hex")}$${key.toString("hex")}`;
+  const key = await scrypt(password, salt, SCRYPT_KEY_BYTES, {
+    ...cost,
+    maxmem: SCRYPT_MAXMEM,
+  });
+  return `scrypt$N=${cost.N},r=${cost.r},p=${cost.p}$${salt.toString("hex")}$${key.toString("hex")}`;
+}
+
+/** Splits a stored hash; null when it is not one we wrote. */
+function parseHash(stored) {
+  const parts = String(stored).split("$");
+  if (parts[0] !== "scrypt") return null;
+  if (parts.length === 3) {
+    return { cost: LEGACY_SCRYPT_COST, salt: parts[1], key: parts[2] };
+  }
+  if (parts.length !== 4) return null;
+  const cost = Object.fromEntries(
+    parts[1].split(",").map((pair) => {
+      const [name, value] = pair.split("=");
+      return [name, Number(value)];
+    }),
+  );
+  const valid =
+    Number.isInteger(cost.N) &&
+    cost.N > 1 &&
+    (cost.N & (cost.N - 1)) === 0 &&
+    cost.N <= 2 ** 20 &&
+    Number.isInteger(cost.r) &&
+    cost.r > 0 &&
+    cost.r <= 32 &&
+    Number.isInteger(cost.p) &&
+    cost.p > 0 &&
+    cost.p <= 16;
+  return valid ? { cost, salt: parts[2], key: parts[3] } : null;
 }
 
 async function verifyPassword(password, stored) {
-  const [scheme, salt, key] = String(stored).split("$");
-  if (scheme !== "scrypt" || !salt || !key) return false;
-  const expected = Buffer.from(key, "hex");
+  const parsed = parseHash(stored);
+  if (!parsed || !parsed.salt || !parsed.key) return false;
+  const expected = Buffer.from(parsed.key, "hex");
   if (expected.length !== SCRYPT_KEY_BYTES) return false;
   const actual = await scrypt(
     password,
-    Buffer.from(salt, "hex"),
+    Buffer.from(parsed.salt, "hex"),
     SCRYPT_KEY_BYTES,
+    { ...parsed.cost, maxmem: SCRYPT_MAXMEM },
   );
   return crypto.timingSafeEqual(expected, actual);
 }
+
+function needsRehash(stored) {
+  const parsed = parseHash(stored);
+  return (
+    !parsed ||
+    parsed.cost.N < SCRYPT_COST.N ||
+    parsed.cost.r < SCRYPT_COST.r ||
+    parsed.cost.p < SCRYPT_COST.p
+  );
+}
+
+// Compared against when the username does not exist, so that an unknown
+// account costs the same time as a wrong password.
+const DUMMY_HASH = `scrypt$N=${SCRYPT_COST.N},r=${SCRYPT_COST.r},p=${SCRYPT_COST.p}$${"0".repeat(32)}$${"0".repeat(128)}`;
 
 const hashToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
@@ -71,13 +124,17 @@ export function createAuthStore(db) {
           username: row.username,
           isAdmin: row.is_admin === 1,
           createdAt: row.created_at,
+          disabled: Boolean(row.disabled_at),
+          lastLoginAt: row.last_login_at ?? null,
         }
       : null;
+  const USER_COLUMNS =
+    "id, username, is_admin, created_at, disabled_at, last_login_at";
   const selectUserById = db.prepare(
-    "SELECT id, username, is_admin, created_at FROM users WHERE id = ?",
+    `SELECT ${USER_COLUMNS} FROM users WHERE id = ?`,
   );
   const selectUserByUsername = db.prepare(
-    "SELECT id, username, password_hash, is_admin, created_at FROM users WHERE username = ? COLLATE NOCASE",
+    `SELECT ${USER_COLUMNS}, password_hash FROM users WHERE username = ? COLLATE NOCASE`,
   );
   const selectSession = db.prepare(
     "SELECT token_hash, user_id, expires_at FROM sessions WHERE token_hash = ?",
@@ -105,11 +162,70 @@ export function createAuthStore(db) {
 
     listUsers() {
       return db
-        .prepare(
-          "SELECT id, username, is_admin, created_at FROM users ORDER BY created_at",
-        )
+        .prepare(`SELECT ${USER_COLUMNS} FROM users ORDER BY created_at`)
         .all()
         .map(publicUser);
+    },
+
+    /** Accounts others can share diagrams with: enabled ones, by name. */
+    directory() {
+      return db
+        .prepare(
+          "SELECT id, username FROM users WHERE disabled_at IS NULL ORDER BY username COLLATE NOCASE",
+        )
+        .all();
+    },
+
+    /** Blocks or unblocks sign-in; a blocked account loses its sessions. */
+    setDisabled(userId, disabled) {
+      const user = selectUserById.get(userId);
+      if (!user) return { status: "not_found" };
+      if (user.is_admin === 1) return { status: "is_admin" };
+      db.transaction(() => {
+        db.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(
+          disabled ? new Date().toISOString() : null,
+          userId,
+        );
+        if (disabled) {
+          db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+        }
+      })();
+      return {
+        status: "changed",
+        user: publicUser(selectUserById.get(userId)),
+      };
+    },
+
+    /**
+     * Removes an account. Its diagrams go to `transferTo` (they are never
+     * deleted with it); its sessions and memberships go with the account.
+     */
+    deleteUser(userId, { transferTo }) {
+      const user = selectUserById.get(userId);
+      if (!user) return { status: "not_found" };
+      if (user.is_admin === 1) return { status: "is_admin" };
+      const heir = selectUserById.get(transferTo);
+      if (!heir || heir.id === userId || heir.disabled_at) {
+        return { status: "invalid_transfer" };
+      }
+      const moved = db.transaction(() => {
+        const ids = db
+          .prepare("SELECT id FROM diagrams WHERE owner_id = ?")
+          .all(userId)
+          .map((row) => row.id);
+        db.prepare("UPDATE diagrams SET owner_id = ? WHERE owner_id = ?").run(
+          heir.id,
+          userId,
+        );
+        // The heir owns them now, so a membership of theirs is redundant.
+        const dropMembership = db.prepare(
+          "DELETE FROM diagram_members WHERE diagram_id = ? AND user_id = ?",
+        );
+        for (const id of ids) dropMembership.run(id, heir.id);
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        return ids;
+      })();
+      return { status: "deleted", user: publicUser(user), diagrams: moved };
     },
 
     async createUser({
@@ -140,10 +256,18 @@ export function createAuthStore(db) {
     async verifyCredentials({ username, password }) {
       const row = selectUserByUsername.get(username);
       // Hash even when the user is unknown so timing does not leak existence.
-      const stored =
-        row?.password_hash || `scrypt$${"0".repeat(32)}$${"0".repeat(128)}`;
+      const stored = row?.password_hash || DUMMY_HASH;
       const matches = await verifyPassword(password, stored);
-      return row && matches ? publicUser(row) : null;
+      if (!row || !matches) return null;
+      // Disabled accounts are only reported to someone who knows the password.
+      if (row.disabled_at) return { ...publicUser(row), disabled: true };
+      if (needsRehash(row.password_hash)) {
+        const upgraded = await hashPassword(password);
+        db.prepare(
+          "UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?",
+        ).run(upgraded, row.id, row.password_hash);
+      }
+      return publicUser(row);
     },
 
     getUser(id) {
@@ -192,6 +316,10 @@ export function createAuthStore(db) {
     createSession(userId) {
       const token = crypto.randomBytes(32).toString("base64url");
       const now = Date.now();
+      db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(
+        new Date(now).toISOString(),
+        userId,
+      );
       db.prepare(
         "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
       ).run(
@@ -214,7 +342,7 @@ export function createAuthStore(db) {
         return null;
       }
       const user = publicUser(selectUserById.get(session.user_id));
-      if (!user) {
+      if (!user || user.disabled) {
         db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
         return null;
       }
@@ -242,6 +370,30 @@ export function createAuthStore(db) {
       return db
         .prepare("DELETE FROM sessions WHERE expires_at <= ?")
         .run(new Date().toISOString()).changes;
+    },
+  };
+}
+
+/**
+ * The code that proves, while the instance has no accounts yet, that whoever
+ * creates the first (administrator) account has access to the server: it is
+ * printed in the server log, or set beforehand with SETUP_CODE.
+ */
+export function createSetupCode(configured = process.env.SETUP_CODE) {
+  const code =
+    typeof configured === "string" && configured.trim().length >= 8
+      ? configured.trim()
+      : crypto.randomBytes(9).toString("base64url");
+  const expected = crypto.createHash("sha256").update(code).digest();
+  return {
+    code,
+    matches(candidate) {
+      if (typeof candidate !== "string") return false;
+      const actual = crypto
+        .createHash("sha256")
+        .update(candidate.trim())
+        .digest();
+      return crypto.timingSafeEqual(expected, actual);
     },
   };
 }

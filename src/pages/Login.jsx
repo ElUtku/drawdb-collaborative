@@ -40,6 +40,7 @@ export default function Login({ mode = "login" }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [setupCode, setSetupCode] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -79,8 +80,11 @@ export default function Login({ mode = "login" }) {
     setSubmitting(true);
     try {
       const credentials = { username: username.trim(), password };
-      if (isRegister) await register(credentials);
-      else await login(credentials);
+      if (isRegister) {
+        await register(
+          setupRequired ? { ...credentials, setupCode } : credentials,
+        );
+      } else await login(credentials);
       navigate(redirectTo, { replace: true });
     } catch (submitError) {
       setError(
@@ -113,6 +117,23 @@ export default function Login({ mode = "login" }) {
         )}
 
         <form onSubmit={submit} className="flex flex-col gap-4">
+          {isRegister && setupRequired && (
+            <div>
+              <label className="text-sm font-medium" htmlFor="setup-code">
+                {t("setup_code")}
+              </label>
+              <Input
+                id="setup-code"
+                value={setupCode}
+                onChange={setSetupCode}
+                autoComplete="off"
+                className="mt-1"
+              />
+              <div className="text-xs text-zinc-500 mt-1">
+                {t("setup_code_hint")}
+              </div>
+            </div>
+          )}
           <div>
             <label className="text-sm font-medium" htmlFor="username">
               {t("username")}

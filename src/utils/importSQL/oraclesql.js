@@ -24,6 +24,7 @@ const affinity = {
 export function fromOracleSQL(ast, diagramDb = DB.GENERIC) {
   const tables = [];
   const relationships = [];
+  const deferred = [];
   const enums = [];
 
   const parseSingleStatement = (e) => {
@@ -82,6 +83,19 @@ export function fromOracleSQL(ast, diagramDb = DB.GENERIC) {
             table.fields.push(field);
           } else if (d.resource === "constraint") {
             if (
+              d.constraint?.primary_key === "primary key" &&
+              Array.isArray(d.constraint.columns)
+            ) {
+              for (const name of d.constraint.columns) {
+                const field = table.fields.find((f) => f.name === name);
+                if (field) {
+                  field.primary = true;
+                  field.notNull = true;
+                }
+              }
+              return;
+            }
+            if (
               d.constraint?.unique === "unique" &&
               Array.isArray(d.constraint.columns)
             ) {
@@ -98,58 +112,60 @@ export function fromOracleSQL(ast, diagramDb = DB.GENERIC) {
             }
 
             if (!d.constraint?.reference) return;
+            // Resolved once every table is known: the referenced one may come later.
+            deferred.push(() => {
+              const relationship = {};
+              const startFieldNames = d.constraint.columns;
+              const endFieldNames = d.constraint.reference.columns;
+              const startFieldName = startFieldNames[0];
+              const endTableName = d.constraint.reference.object.name;
 
-            const relationship = {};
-            const startFieldNames = d.constraint.columns;
-            const endFieldNames = d.constraint.reference.columns;
-            const startFieldName = startFieldNames[0];
-            const endTableName = d.constraint.reference.object.name;
+              const endTable = tables.find((t) => t.name === endTableName);
+              if (!endTable) return;
 
-            const endTable = tables.find((t) => t.name === endTableName);
-            if (!endTable) return;
+              const fieldPairs = [];
+              for (let i = 0; i < startFieldNames.length; i++) {
+                const sf = table.fields.find(
+                  (f) => f.name === startFieldNames[i],
+                );
+                const ef = endTable.fields.find(
+                  (f) => f.name === endFieldNames[i],
+                );
+                if (!sf || !ef) break;
+                fieldPairs.push({ startFieldId: sf.id, endFieldId: ef.id });
+              }
+              if (fieldPairs.length !== startFieldNames.length) return;
 
-            const fieldPairs = [];
-            for (let i = 0; i < startFieldNames.length; i++) {
-              const sf = table.fields.find(
-                (f) => f.name === startFieldNames[i],
+              const startField = table.fields.find(
+                (f) => f.name === startFieldName,
               );
-              const ef = endTable.fields.find(
-                (f) => f.name === endFieldNames[i],
-              );
-              if (!sf || !ef) break;
-              fieldPairs.push({ startFieldId: sf.id, endFieldId: ef.id });
-            }
-            if (fieldPairs.length !== startFieldNames.length) return;
 
-            const startField = table.fields.find(
-              (f) => f.name === startFieldName,
-            );
+              relationship.id = nanoid();
+              relationship.startTableId = table.id;
+              relationship.startFieldId = fieldPairs[0].startFieldId;
+              relationship.endTableId = endTable.id;
+              relationship.endFieldId = fieldPairs[0].endFieldId;
+              relationship.fields = fieldPairs;
+              relationship.updateConstraint = Constraint.NONE;
+              relationship.name =
+                d.name && Boolean(d.name.trim())
+                  ? d.name
+                  : `fk_${table.name}_${startFieldName}_${endTableName}`;
+              relationship.deleteConstraint =
+                d.constraint.reference.on_delete &&
+                Boolean(d.constraint.reference.on_delete.trim())
+                  ? d.constraint.reference.on_delete[0].toUpperCase() +
+                    d.constraint.reference.on_delete.substring(1)
+                  : Constraint.NONE;
 
-            relationship.id = nanoid();
-            relationship.startTableId = table.id;
-            relationship.startFieldId = fieldPairs[0].startFieldId;
-            relationship.endTableId = endTable.id;
-            relationship.endFieldId = fieldPairs[0].endFieldId;
-            relationship.fields = fieldPairs;
-            relationship.updateConstraint = Constraint.NONE;
-            relationship.name =
-              d.name && Boolean(d.name.trim())
-                ? d.name
-                : `fk_${table.name}_${startFieldName}_${endTableName}`;
-            relationship.deleteConstraint =
-              d.constraint.reference.on_delete &&
-              Boolean(d.constraint.reference.on_delete.trim())
-                ? d.constraint.reference.on_delete[0].toUpperCase() +
-                  d.constraint.reference.on_delete.substring(1)
-                : Constraint.NONE;
+              if (startField.unique) {
+                relationship.cardinality = Cardinality.ONE_TO_ONE;
+              } else {
+                relationship.cardinality = Cardinality.MANY_TO_ONE;
+              }
 
-            if (startField.unique) {
-              relationship.cardinality = Cardinality.ONE_TO_ONE;
-            } else {
-              relationship.cardinality = Cardinality.MANY_TO_ONE;
-            }
-
-            relationships.push(relationship);
+              relationships.push(relationship);
+            });
           }
         });
         tables.push(table);
@@ -158,6 +174,8 @@ export function fromOracleSQL(ast, diagramDb = DB.GENERIC) {
   };
 
   ast.forEach((e) => parseSingleStatement(e));
+
+  for (const run of deferred) run();
 
   return { tables, relationships, enums };
 }

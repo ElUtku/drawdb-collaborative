@@ -16,11 +16,13 @@ import {
   redact,
   serializeDiagramFile,
   slugifyFileName,
-  withCredentials,
+  credentialConfig,
+  isAllowedHost,
+  remoteHost,
 } from "./git.js";
 import { createApplication } from "./index.js";
 
-/* global process */
+/* global process, Buffer */
 
 const PASSWORD = "correct-horse-9";
 const JSON_HEADERS = { "Content-Type": "application/json" };
@@ -53,13 +55,21 @@ async function listen(application) {
 async function signedInInstance(workdir) {
   process.env.GIT_ALLOW_LOCAL_REMOTES = "1";
   process.env.GIT_WORKDIR = workdir;
-  const application = createApplication({ databasePath: ":memory:" });
+  const application = createApplication({
+    databasePath: ":memory:",
+    setupCode: "test-setup-code",
+    log: () => {},
+  });
   const port = await listen(application);
   const base = `http://127.0.0.1:${port}`;
   const registered = await fetch(`${base}/api/auth/register`, {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ username: "root", password: PASSWORD }),
+    body: JSON.stringify({
+      username: "root",
+      password: PASSWORD,
+      setupCode: "test-setup-code",
+    }),
   });
   assert.equal(registered.status, 201);
   const cookie = registered.headers.get("set-cookie").split(";")[0];
@@ -102,24 +112,68 @@ test("normalizes the in-repository location", () => {
   assert.equal(slugifyFileName("////"), "schema");
 });
 
-test("keeps credentials out of URLs and error output", () => {
-  const url = withCredentials("https://github.com/acme/schema.git", {
-    authUsername: "bot",
-    token: "secret-token",
-  });
-  assert.equal(url, "https://bot:secret-token@github.com/acme/schema.git");
+test("keeps credentials out of URLs, command lines and error output", () => {
+  const { config, secrets } = credentialConfig(
+    "https://github.com/acme/schema.git",
+    { authUsername: "bot", token: "secret-token" },
+  );
+  assert.deepEqual(config, [
+    [
+      "http.https://github.com/.extraHeader",
+      `Authorization: Basic ${Buffer.from("bot:secret-token").toString("base64")}`,
+    ],
+  ]);
+  assert.ok(secrets.includes("secret-token"));
   // An SSH remote authenticates with a key, so no credential is injected.
-  assert.equal(
-    withCredentials("git@github.com:acme/schema.git", {
+  assert.deepEqual(
+    credentialConfig("git@github.com:acme/schema.git", {
       token: "secret-token",
-    }),
-    "git@github.com:acme/schema.git",
+    }).config,
+    [],
+  );
+  assert.throws(
+    () => normalizeRemoteUrl("https://bot:secret-token@github.com/a/b.git"),
+    /token/i,
+  );
+  assert.equal(
+    normalizeRemoteUrl("https://bot@github.com/a/b.git"),
+    "https://bot@github.com/a/b.git",
   );
   const message = redact(
     "fatal: unable to access 'https://bot:secret-token@github.com/acme/schema.git'",
     ["secret-token"],
   );
   assert.equal(message.includes("secret-token"), false);
+});
+
+test("GIT_ALLOWED_HOSTS limits the hosts the server will contact", () => {
+  assert.equal(
+    remoteHost("git@git.example.com:team/repo.git"),
+    "git.example.com",
+  );
+  assert.equal(
+    remoteHost("https://Git.Example.com:8443/x.git"),
+    "git.example.com",
+  );
+  assert.equal(isAllowedHost("git.example.com", ""), true);
+  assert.equal(isAllowedHost("git.example.com", "git.example.com"), true);
+  assert.equal(isAllowedHost("evil.com", "git.example.com"), false);
+  assert.equal(isAllowedHost("a.example.com", "*.example.com"), true);
+  assert.equal(isAllowedHost("example.com", "*.example.com"), false);
+  assert.equal(isAllowedHost("badexample.com", "*.example.com"), false);
+  process.env.GIT_ALLOWED_HOSTS = "git.example.com";
+  try {
+    assert.throws(
+      () => normalizeRemoteUrl("https://169.254.169.254/latest"),
+      /not allowed/,
+    );
+    assert.equal(
+      normalizeRemoteUrl("https://git.example.com/a.git"),
+      "https://git.example.com/a.git",
+    );
+  } finally {
+    delete process.env.GIT_ALLOWED_HOSTS;
+  }
 });
 
 test("stores repository tokens encrypted and hides them from the API shape", () => {
@@ -326,6 +380,17 @@ test("repository settings are owner-only and never leak the token", async (t) =>
     body: JSON.stringify({ username: "member", password: PASSWORD }),
   });
   const memberCookie = login.headers.get("set-cookie").split(";")[0];
+  const memberId = (await login.json()).user.id;
+  // Diagrams are private until shared; make "member" an editor of this one.
+  const shared = await fetch(
+    `${base}/api/diagrams/${diagram.id}/members/${memberId}`,
+    {
+      method: "PUT",
+      headers: authed,
+      body: JSON.stringify({ role: "editor" }),
+    },
+  );
+  assert.equal(shared.status, 200);
 
   const settings = JSON.stringify({
     remoteUrl: "https://github.com/acme/schema.git",
@@ -355,8 +420,72 @@ test("repository settings are owner-only and never leak the token", async (t) =>
   });
   const state = await visible.json();
   assert.equal(state.canConfigure, false);
+  assert.equal(state.canSync, true);
   assert.equal(state.settings.remoteUrl, "https://github.com/acme/schema.git");
 
   const anonymous = await fetch(`${base}/api/diagrams/${diagram.id}/git`);
   assert.equal(anonymous.status, 401);
+});
+
+test("a symbolic link in the repository cannot redirect writes outside it", async (t) => {
+  if (!(await isGitAvailable())) {
+    t.skip("git is not installed");
+    return;
+  }
+  const root = temporaryDirectory("drawdb-git-link-");
+  const remote = path.join(root, "remote.git");
+  const seed = path.join(root, "seed");
+  const victim = path.join(root, "victim.sqlite");
+  fs.writeFileSync(victim, "precious data");
+  fs.mkdirSync(remote, { recursive: true });
+  runGit(["init", "--bare", "-b", "main", "."], remote);
+  fs.mkdirSync(seed);
+  runGit(["init", "-b", "main", "."], seed);
+  fs.symlinkSync(victim, path.join(seed, "schema.json"));
+  runGit(["add", "-A"], seed);
+  runGit(["commit", "-m", "plant a link"], seed);
+  runGit(["push", remote, "main"], seed);
+
+  const { application, base, cookie } = await signedInInstance(
+    path.join(root, "work"),
+  );
+  t.after(() => {
+    application.server.close();
+    application.database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+    delete process.env.GIT_ALLOW_LOCAL_REMOTES;
+    delete process.env.GIT_WORKDIR;
+  });
+  const authed = { ...JSON_HEADERS, Cookie: cookie };
+  const diagram = await (
+    await fetch(`${base}/api/diagrams`, {
+      method: "POST",
+      headers: authed,
+      body: JSON.stringify({
+        name: "Linked",
+        document: { database: "postgresql", tables: [], references: [] },
+      }),
+    })
+  ).json();
+  await fetch(`${base}/api/diagrams/${diagram.id}/git`, {
+    method: "PUT",
+    headers: authed,
+    body: JSON.stringify({
+      remoteUrl: pathToFileURL(remote).href,
+      branch: "main",
+      fileName: "schema",
+    }),
+  });
+  await fetch(`${base}/api/diagrams/${diagram.id}/git/push`, {
+    method: "POST",
+    headers: authed,
+    body: JSON.stringify({ sql: "SELECT 1;" }),
+  });
+  assert.equal(fs.readFileSync(victim, "utf8"), "precious data");
+  const pulled = await fetch(`${base}/api/diagrams/${diagram.id}/git/pull`, {
+    method: "POST",
+    headers: authed,
+  });
+  assert.notEqual(pulled.status, 500);
+  assert.equal(fs.readFileSync(victim, "utf8"), "precious data");
 });
