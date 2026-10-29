@@ -4,24 +4,25 @@ import {
   tableHeaderHeight,
 } from "../data/constants";
 
+// Tables go in a grid with room between them for the relationship lines,
+// their cardinality marks and their names.
 export function arrangeTables(diagram) {
-  let maxHeight = -1;
-  const tableWidth = 200;
-  const gapX = 54;
-  const gapY = 40;
-  diagram.tables.forEach((table, i) => {
-    if (i < diagram.tables.length / 2) {
-      table.x = i * tableWidth + (i + 1) * gapX;
-      table.y = gapY;
-      const height =
-        table.fields.length * tableFieldHeight +
-        tableHeaderHeight +
-        tableColorStripHeight;
-      maxHeight = Math.max(height, maxHeight);
-    } else {
-      const index = diagram.tables.length - i - 1;
-      table.x = index * tableWidth + (index + 1) * gapX;
-      table.y = maxHeight + 2 * gapY;
-    }
-  });
+  const tableWidth = 240;
+  const gapX = 160;
+  const gapY = 90;
+  const count = diagram.tables.length;
+  const columns = Math.max(1, Math.ceil(Math.sqrt(count * 1.6)));
+  const height = (table) =>
+    table.fields.length * tableFieldHeight +
+    tableHeaderHeight +
+    tableColorStripHeight;
+  let y = gapY;
+  for (let start = 0; start < count; start += columns) {
+    const row = diagram.tables.slice(start, start + columns);
+    row.forEach((table, i) => {
+      table.x = gapX / 2 + i * (tableWidth + gapX);
+      table.y = y;
+    });
+    y += Math.max(...row.map(height)) + gapY;
+  }
 }
