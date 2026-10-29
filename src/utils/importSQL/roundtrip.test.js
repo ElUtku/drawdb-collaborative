@@ -473,6 +473,35 @@ ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_customer" FOREIGN KEY ("customer_
   );
 });
 
+test("SQLite: GLOB checks and triggers (with ; inside their body) import", () => {
+  const diagram = importScript(
+    `-- comentario
+CREATE TABLE positions (
+  positionId INTEGER NOT NULL,
+  ext TEXT NOT NULL CHECK (ext <> '' AND ext NOT GLOB '*[^0-9]*'),   -- 101, 102
+  CONSTRAINT pk_positions PRIMARY KEY (positionId)
+);
+CREATE UNIQUE INDEX idx_positions_ext ON positions (ext);
+
+--regla
+CREATE TRIGGER trg_positions_ext
+BEFORE INSERT ON positions
+WHEN NEW.ext = 'x'
+BEGIN
+      SELECT RAISE(ABORT, 'extension repetida');
+END;
+
+CREATE TABLE rooms (roomId INTEGER PRIMARY KEY);`,
+    DB.SQLITE,
+  );
+  assert.deepEqual(
+    diagram.tables.map((t) => t.name),
+    ["positions", "rooms"],
+  );
+  const ext = diagram.tables[0].fields.find((f) => f.name === "ext");
+  assert.equal(ext.check, "ext <> '' AND ext NOT GLOB '*[^0-9]*'");
+});
+
 test("statements split without breaking strings, quoted names or comments", () => {
   const prepared = prepareSQL(
     `CREATE TABLE "a;b" (x TEXT DEFAULT 'semi;colon -- not a comment');

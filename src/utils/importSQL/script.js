@@ -3,6 +3,7 @@
 // back on. The parsers are passed in so the caller decides how to load them.
 
 import { DB } from "../../data/constants.js";
+import { arrangeTables } from "../arrangeTables.js";
 import { importSQL } from "./index.js";
 import { normalizeSQLForParser } from "./normalize.js";
 import { applyPrepared, applyTableChecks, prepareSQL } from "./prepare.js";
@@ -41,7 +42,10 @@ export function diagramFromScript(parsed, database, diagramDb = database) {
   if (parsed.exprToSQL) {
     applyTableChecks(diagram, parsed.ast, parsed.exprToSQL);
   }
-  return applyPrepared(diagram, parsed.extras);
+  const result = applyPrepared(diagram, parsed.extras);
+  // Relationships set aside by the preparation exist only now.
+  arrangeTables(result);
+  return result;
 }
 
 export function importScript(source, options) {
