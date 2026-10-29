@@ -16,6 +16,9 @@ const OPEN = "\u0000";
 const CLOSE = "\u0001";
 const MARKED = new RegExp(`${OPEN}([^${CLOSE}]*)${CLOSE}`, "g");
 
+// A statement's text without the comment marks.
+const bare = (text) => text.replace(MARKED, " ").trim();
+
 /** Splits on ";" (and SQL Server "GO", Oracle "/" lines) outside quotes. */
 export function splitStatements(sql, database) {
   const statements = [];
@@ -83,6 +86,18 @@ export function splitStatements(sql, database) {
       continue;
     }
     if (ch === ";") {
+      // A trigger's body has its own ";": it ends at END.
+      if (
+        (database === DB.SQLITE ||
+          database === DB.MYSQL ||
+          database === DB.MARIADB) &&
+        /^CREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\b/i.test(bare(current)) &&
+        !/\bEND\s*$/i.test(bare(current))
+      ) {
+        current += ch;
+        i++;
+        continue;
+      }
       // pg_dump: the rows of COPY ... FROM stdin follow, up to a "\." line.
       const copy = /^\s*COPY\b[\s\S]*\bFROM\s+stdin$/i.test(current.trim());
       push();
@@ -412,6 +427,13 @@ export function prepareSQL(sql, database) {
     if (database === DB.SQLITE) {
       statement = readLineComments(statement, extras);
       if (!statement) continue;
+    }
+    if (database === DB.SQLITE) {
+      // The grammar does not know GLOB: RLIKE (which SQLite lacks) stands in
+      // for it and goes back to GLOB in the checks (see applyPrepared).
+      statement = outsideStrings(statement, (part) =>
+        part.replace(/\bGLOB\b/gi, "RLIKE"),
+      );
     }
     statement = protectNames(statement, database, extras.names);
 
@@ -978,6 +1000,17 @@ export function applyPrepared(diagram, prepared) {
             index.fields.join("\u0000") !== columns.join("\u0000"),
         )
         .map((index, i) => ({ ...index, id: i }));
+    }
+  }
+  if (extras.database === DB.SQLITE) {
+    for (const table of diagram.tables ?? []) {
+      for (const field of table.fields ?? []) {
+        if (field.check) {
+          field.check = outsideStrings(String(field.check), (part) =>
+            part.replace(/\bRLIKE\b/gi, "GLOB"),
+          );
+        }
+      }
     }
   }
   // DEFAULT NULL is what a column has without a default (mysqldump writes
